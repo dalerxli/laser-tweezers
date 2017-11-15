@@ -320,6 +320,10 @@ def afm_run(sensor='AFM', col=1):
     outfile = '_'.join((rootpathname, sensor, "sig.csv"))
     print('Exporting raw signal csv for %s' %sensor)
     sdf.to_csv(outfile, index=False)
+
+    # return the psd df for processing by detect_peaks
+    return df
+
 def single_channel_run(sensor, col, channel=1):
     """ Run over all subdirs, extracting/transforming signal from <channel>
         Yes, this is inefficient. Fight me. I'm sorry.
@@ -356,25 +360,68 @@ def single_channel_run(sensor, col, channel=1):
     print('Exporting raw signal csv for %s' %sensor)
     sdf.to_csv(outfile, index=False)
 
-def get_params_old(f):
-    """ Pre 04/07/2017
-        Returns: t, fs, date (ndarray, float, string)
-        Maybe use date for start of file name?
+## Detect Peaks suite
+def get_peaks(psd_df, thresh_sd=3, space=10):
+    """ Return a df containing only peaks. Minimum peak height is equal to
+    'mean + thresh_sd * sd' Adjacent columns of the same freq that do not
+    contain peaks will be 0. If no peaks are found at a given freq in any
+    columns that row will be omitted from the df.
+
+    Notes:
+    - 2 options for filling non-peak cells in the df: zeros or NaN
+    - NaN: apparently might allow for easier elimination of "empty" cells, I can
+      also see it being easier to count, average, etc the peaks
+    - Zeros: going w/ this for now b/c I don't know how much Excel and/or MatLab
+      will like importing and encountering 'NaN' while plotting -- which is 
+      probably what the primary downstream use of the data from this function
+      be. We can always have another function to change 0 >> NaN afterwards --
+      god knows we aren't programming for peak effeciency here.
+      >>> # Eliminate rows that contain only zeros
+      >>> peaks_df = peaks_df.loc[(peaks_df!=0).any(axis=1)]
     """
-    # TODO num segments -> num loops (only rel for old ramps)
-    T = float(get_match_val(f, "force-settings.segment.1.duration:"))    # t= duration in secs
-    N = int(get_match_val(f, "force-settings.segment.1.num-points:"))     #N= data points
-    fs = N/T
-    dt = 1/fs
-    t = np.arange(dt, T+dt, dt)  #to generate X axis time point, dt= is the time resolution to make it start and end at the same recording times 
-    date = get_match_val(f, "approachID:")
-    date = date.split('-')[0] # date is at front of bead-id string
-    return t, fs, date
+    # they will probably want detect_peaks to be physically in this file...
+    from detect_peaks import detect_peaks
+
+    # Create a df of zeros in which to store the peaks 
+    psd_no_hz = psd_df.iloc[:, range(1, len(psd_df.columns))]
+    peaks_df = pd.DataFrame(np.zeros_like(psd_no_hz),
+                           index=psd_no_hz.index, columns=psd_no_hz.columns)
+    # this df was tmp
+    psd_no_hz = ""
+    
+    # iterate detect_peaks over each psd column in the df and add the peaks to
+    # df of zeros at their index
+    for i in range(1, len(psd_df.columns)):
+        y = psd_df.iloc[:, i]
+        thresh = np.mean(y) + thresh_sd * np.std(y)
+        ind = detect_peaks(y, mph=thresh, mpd=space)
+        peaks_df.iloc[ind, i-1] = psd_df.iloc[ind, i]
+        
+    # take only rows in which any column contains a non-zero
+    peaks_df = peaks_df.loc[(peaks_df!=0).any(axis=1)]
+
+    # add the Hz col back in
+    # peaks_df.index == row names, which are same indexes from psd_df
+    tmp = psd_df.iloc[:,0].loc[peaks_df.index]
+    # note: pd.DataFrame.insert is automatically an inplace operation
+    peaks_df.insert(0, 'Hz', tmp)
+    
+    return peaks_df
+def export_peaks(peaks_df, rootpath, sensor):
+    """ Export the peaks df to a csv. Great docstring.
+
+    TODO: if this runs okay, incorporate thresh_sd into the outfile name
+    """
+    rootpathname = '/'.join((rootpath, rootpath.split('/')[-1]))
+    outfile = '_'.join((rootpathname, sensor, "psd_peaks.csv"))
+    print('Exporting PSD peaks csv for %s' %sensor)
+    peaks_df.to_csv(outfile, index=False)
+
 #------------------------------------------------- }}}
 ### SCRIPT INFO
-version = '0.4'
-day = '2017-11-09'
-codename = 'Cid Finalfantasy Two' 
+version = '0.5'
+day = '2017-11-15'
+codename = 'Peroxide Peroxide' 
 print("Version %s (%s) -- \"%s\"" %(version, day, codename) )
 
 
@@ -396,6 +443,10 @@ parser.set_defaults(run_y_fft=False)
 parser.add_argument('-nz', '--nozfft', dest='run_z_fft', action='store_false',
     help='DO NOT run FFT on Z signal (experimental)')
 parser.set_defaults(run_z_fft=True)
+# testing
+parser.add_argument('--detect_peaks', dest='detect_peaks', action='store_true',
+    help='Output separate file of peaks above <thershold_tbd>')
+parser.set_defaults(detect_peaks=True)
 
 args = parser.parse_args()
 
@@ -437,7 +488,20 @@ if forcesave_type['optical'] == True:
 ### AFM Run
 if forcesave_type['afm'] == True:
     print('Forcesave Type: AFM')
-    afm_run(col=1)
+    # afm_run(col=1)
+    psd_df = afm_run(col=1)
+
+### Detect Peaks Run
+""" This is bad. If we want to simply use the df w/o reading the output csv
+we need to modify afm_run. As well as single_channel_run...
+Now let's try this out
+"""
+if args.detect_peaks == True:
+    peaks_df = get_peaks(psd_df)
+    # oh no we should have a generic filename/export function
+    if forcesave_type['afm'] == True:
+        sensor = 'AFM'
+    export_peaks(peaks_df, rootpath, sensor)
 
 ### Get out while you can
 print("YOU ARE ALL FREE NOW")
