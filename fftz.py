@@ -27,9 +27,9 @@ b/c this was in detect_peaks.py, and we should use non-ambiguous div ops
 
 ### SCRIPT INFO
 __author__ = 'Nick Chahley, https://github.com/pantsthecat'
-__version__ = '0.1x'
+__version__ = '0.1.1'
 __day__ = '2017-11-16'
-__codename__ = 'Selenium Chloride x' 
+__codename__ = 'Cozy Ghostmood' 
 print("Version %s (%s) -- \"%s\"" %(__version__, __day__, __codename__) )
 
 ### Imports and defs {{{
@@ -42,6 +42,57 @@ import os
 import sys
 import pandas as pd
 import scipy.signal
+
+### SCRIPT ARGUMENTS (Lowpass filtering below 1Hz) salim
+# These are a bunch of useful command line flags/args the utility of which will
+# probably never see the light of day b/c (a) everyone wants the run the script
+# just by double-clicking it and (b) I have no idea how to program a gui --nikoli
+parser = argparse.ArgumentParser()
+parser.add_argument('-cl', '--cf_low', type=float, default=1.,
+    help='Low cutoff freq for bandpass filter in Hz (def 1Hz)')
+parser.add_argument('--nofilter', dest='filter_on', action='store_false')
+parser.add_argument('--filter', dest='filter_on', action='store_true',
+    help='def')
+parser.set_defaults(filter_on=True) #def: exported sig will also be filtered
+
+# Sensor specificity
+parser.add_argument('-x', '--xfft', dest='run_x_fft', action='store_true',
+    help='Run FFT on X signal')
+parser.set_defaults(run_x_fft=False)
+parser.add_argument('-y', '--yfft', dest='run_y_fft', action='store_true',
+    help='Run FFT on Y signal')
+parser.set_defaults(run_y_fft=False)
+parser.add_argument('-z', '--zfft', dest='run_z_fft', action='store_true',
+    help='Run FFT on Z signal (def)')
+parser.add_argument('-nz', '--nozfft', dest='run_z_fft', action='store_false',
+    help='DO NOT run FFT on Z signal')
+parser.set_defaults(run_z_fft=True)
+
+# Peak detection 
+# Can turn it on or off. Please do this. Please don't make two versions, one
+# w/ detect_peaks true and one with it false. If you're going to do this at
+# least make two executables that call the one script but pass different args.
+# These flags just want to be loved -- or even just used...
+parser.add_argument('--detect_peaks', dest='detect_peaks', action='store_true',
+    help='Output separate file of peaks above <thershold_tbd>')
+parser.set_defaults(detect_peaks=True)
+# These two args get used as defaults for the function get_peaks
+# hence defining these before the functions
+parser.add_argument('-tsd', '--thresh_sd', type=float, default=3,
+    help='Multiple of signal sd to set min peak amplitude at (def 3)')
+parser.add_argument('-mpd', '--peak_space', type=int, default=10,
+    help='Value for detect_peaks minimum peak distance (def 10)')
+
+# Access an arg value by the syntax 'args.<argument_name>'
+args = parser.parse_args()
+
+# Report variable settings
+if args.filter_on == True:
+    print("Butterworth order 3 highpass filter is ON")
+    print("Low cutoff frequency is %d Hz" % args.cf_low)
+else:
+    print("Butterworth highpass filter is OFF")
+
 class CommentedFile:
     """ Skips all lines that start with commentstring
     """
@@ -387,7 +438,7 @@ def single_channel_run(sensor, col, channel=1):
     return df
 
 ## Detect Peaks suite
-def get_peaks(psd_df, thresh_sd=3, space=10):
+def get_peaks(psd_df, thresh_sd=args.thresh_sd, space=args.peak_space):
     """ Return a df containing only peaks. Minimum peak height is equal to
     'mean + thresh_sd * sd' Adjacent columns of the same freq that do not
     contain peaks will be 0. If no peaks are found at a given freq in any
@@ -588,49 +639,6 @@ def detect_peaks(x, mph=None, mpd=1, threshold=0, edge='rising',
 #------------------------------------------------- }}}
 
 
-### SCRIPT ARGUMENTS (Lowpass filtering below 1Hz) salim
-# These are a bunch of useful command line flags/args the utility of which will
-# probably never see the light of day b/c (a) everyone wants the run the script
-# just by double-clicking it and (b) I have no idea how to program a gui --nikoli
-parser = argparse.ArgumentParser()
-parser.add_argument('-cl', '--cf_low', type=float, default=1.,
-    help='Low cutoff freq for bandpass filter in Hz (def 1Hz)')
-parser.add_argument('--nofilter', dest='filter_on', action='store_false')
-parser.add_argument('--filter', dest='filter_on', action='store_true',
-    help='def')
-parser.set_defaults(filter_on=True) #def: exported sig will also be filtered
-
-# Sensor specificity
-parser.add_argument('-x', '--xfft', dest='run_x_fft', action='store_true',
-    help='Run FFT on X signal')
-parser.set_defaults(run_x_fft=False)
-parser.add_argument('-y', '--yfft', dest='run_y_fft', action='store_true',
-    help='Run FFT on Y signal')
-parser.set_defaults(run_y_fft=False)
-parser.add_argument('-z', '--zfft', dest='run_z_fft', action='store_true',
-    help='Run FFT on Z signal (def)')
-parser.add_argument('-nz', '--nozfft', dest='run_z_fft', action='store_false',
-    help='DO NOT run FFT on Z signal')
-parser.set_defaults(run_z_fft=True)
-
-# Peak detection. 
-# Can turn it on or off. Please do this. Please don't make two versions, one
-# w/ detect_peaks true and one with it false. If you're going to do this at
-# least make two executables that call the one script but pass different args.
-# These flags just want to be loved -- or even just used.
-parser.add_argument('--detect_peaks', dest='detect_peaks', action='store_true',
-    help='Output separate file of peaks above <thershold_tbd>')
-parser.set_defaults(detect_peaks=True)
-
-# Access an arg value by the syntax 'args.<argument_name>'
-args = parser.parse_args()
-
-# Report variable settings
-if args.filter_on == True:
-    print("Butterworth order 3 highpass filter is ON")
-    print("Low cutoff frequency is %d Hz" % args.cf_low)
-else:
-    print("Butterworth highpass filter is OFF")
 
 # Backslash is the worst path separation character
 rootpath = folder_dialog() # user selects starting folder (QT)
