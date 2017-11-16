@@ -4,7 +4,6 @@ Python codes for handling a specific use case of the JPK force-sensing opical tr
 
 ----
 # Notices
-- Peak detection functionality is dependent on `detect_peaks.py`, meaning that this file _must be in the same directory from which you launch the script or otherwise be in your python path._ 
 - The script appears to work for both optical trap _and_ afm data (on linux at least). It detects this based off of the id string in the force-save file: `# bead-id` (optical) vs `# approachID` (afm). As such, I'm using a single script (`fftz.py`) for development going forward. 
 
 # Goals
