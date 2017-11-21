@@ -3,6 +3,7 @@
 # Python 2.7
 from __future__ import division, print_function
 
+# NOTE FOR DEV USE
 """ PSD calculator and peak detection for JPK Nanotracker 2 Data 
 
 """
@@ -26,13 +27,13 @@ b/c this was in detect_peaks.py, and we should use non-ambiguous div ops
 
 
 ### SCRIPT INFO
-__author__ = 'Nick Chahley, https://github.com/pantsthecat'
-__version__ = '0.1.1'
+__author__ = 'Nick Chahley, https://github.com/pantsthecat/laser-tweezers'
+__version__ = '0.1.1x'
 __day__ = '2017-11-16'
-__codename__ = 'Cozy Ghostmood' 
+__codename__ = 'Rustled Ghostmood x' 
 print("Version %s (%s) -- \"%s\"" %(__version__, __day__, __codename__) )
 
-### Imports and defs {{{
+### Imports and defs and arguments {{{
 # -------------------------------------------------
 import argparse
 import csv
@@ -83,16 +84,15 @@ parser.add_argument('-tsd', '--thresh_sd', type=float, default=3,
 parser.add_argument('-mpd', '--peak_space', type=int, default=10,
     help='Value for detect_peaks minimum peak distance (def 10)')
 
+# for 'peak_detection_sep.py'
+parser.add_argument('-pf', '--psdfile', type=str, 
+    help='Path/to/file. Read psd and detect peaks from this csv file, do not process any force-save files') 
+
 # Access an arg value by the syntax 'args.<argument_name>'
 args = parser.parse_args()
 
-# Report variable settings
-if args.filter_on == True:
-    print("Butterworth order 3 highpass filter is ON")
-    print("Low cutoff frequency is %d Hz" % args.cf_low)
-else:
-    print("Butterworth highpass filter is OFF")
 
+## "Original" functions/class of the script
 class CommentedFile:
     """ Skips all lines that start with commentstring
     """
@@ -166,9 +166,6 @@ def read_forcesave(f, col=2):
     # List of strings >> list of floats
     sig = map(float, sig)   #float = numbers with decimal points
     return sig
-
-
-# NOTE test: export filtered, unwindowed sig
 def psd_powerplay(X, dt):  #X is a varaible name 
     #TODO only need to calc freq once, should be seperate code
     # OR calc each freq, then compare to ensure same, else return warning
@@ -438,62 +435,17 @@ def single_channel_run(sensor, col, channel=1):
     return df
 
 ## Detect Peaks suite
-def get_peaks(psd_df, thresh_sd=args.thresh_sd, space=args.peak_space):
-    """ Return a df containing only peaks. Minimum peak height is equal to
-    'mean + thresh_sd * sd' Adjacent columns of the same freq that do not
-    contain peaks will be 0. If no peaks are found at a given freq in any
-    columns that row will be omitted from the df.
-
-    Notes:
-    - 2 options for filling non-peak cells in the df: zeros or NaN
-    - NaN: apparently might allow for easier elimination of "empty" cells, I can
-      also see it being easier to count, average, etc the peaks
-    - Zeros: going w/ this for now b/c I don't know how much Excel and/or MatLab
-      will like importing and encountering 'NaN' while plotting -- which is 
-      probably what the primary downstream use of the data from this function
-      be. We can always have another function to change 0 >> NaN afterwards --
-      god knows we aren't programming for peak effeciency here.
-      >>> # Eliminate rows that contain only zeros
-      >>> peaks_df = peaks_df.loc[(peaks_df!=0).any(axis=1)]
+def strip_ext(filename, ret_ext=False):
+    """ Strip extension from a filename/path, handle any '.' other than '.ext'
+    that might appear in path.
+    I'm either lazy, or not smart enough to implement this right at the start.
     """
-    # they will probably want detect_peaks to be physically in this file...
-    from detect_peaks import detect_peaks
-
-    # Create a df of zeros in which to store the peaks 
-    psd_no_hz = psd_df.iloc[:, range(1, len(psd_df.columns))]
-    peaks_df = pd.DataFrame(np.zeros_like(psd_no_hz),
-                           index=psd_no_hz.index, columns=psd_no_hz.columns)
-    # this df was tmp
-    psd_no_hz = ""
-    
-    # iterate detect_peaks over each psd column in the df and add the peaks to
-    # df of zeros at their index
-    for i in range(1, len(psd_df.columns)):
-        y = psd_df.iloc[:, i]
-        thresh = np.mean(y) + thresh_sd * np.std(y)
-        ind = detect_peaks(y, mph=thresh, mpd=space)
-        peaks_df.iloc[ind, i-1] = psd_df.iloc[ind, i]
-        
-    # take only rows in which any column contains a non-zero
-    peaks_df = peaks_df.loc[(peaks_df!=0).any(axis=1)]
-
-    # add the Hz col back in
-    # peaks_df.index == row names, which are same indexes from psd_df
-    tmp = psd_df.iloc[:,0].loc[peaks_df.index]
-    # note: pd.DataFrame.insert is automatically an inplace operation
-    peaks_df.insert(0, 'Hz', tmp)
-    
-    return peaks_df
-def export_peaks(peaks_df, rootpath, sensor):
-    """ Export the peaks df to a csv. Great docstring.
-
-    TODO: if this runs okay, incorporate thresh_sd into the outfile name
-    """
-    rootpathname = '/'.join((rootpath, rootpath.split('/')[-1]))
-    outfile = '_'.join((rootpathname, sensor, "psd_peaks.csv"))
-    print('Exporting PSD peaks csv for %s' %sensor)
-    print('Exporting to: %s' %outfile)
-    peaks_df.to_csv(outfile, index=False)
+    filename_strip = '.'.join((filename.split('.')[:-1]))
+    ext = filename.split('.')[-1]
+    if ret_ext == True:
+        return ext
+    else:
+        return filename_strip
 def detect_peaks(x, mph=None, mpd=1, threshold=0, edge='rising',
                  kpsh=False, valley=False, show=False, ax=None):
 
@@ -633,73 +585,170 @@ def detect_peaks(x, mph=None, mpd=1, threshold=0, edge='rising',
         # if valley:
             # x = -x
         # _plot(x, mph, mpd, threshold, edge, valley, ax, ind)
-
     return ind
+def get_peaks(psd_df, thresh_sd=args.thresh_sd, space=args.peak_space):
+    """ Return a df containing only peaks. Minimum peak height is equal to
+    'mean + thresh_sd * sd' Adjacent columns of the same freq that do not
+    contain peaks will be 0. If no peaks are found at a given freq in any
+    columns that row will be omitted from the df.
+
+    Notes:
+    - 2 options for filling non-peak cells in the df: zeros or NaN
+    - NaN: apparently might allow for easier elimination of "empty" cells, I can
+      also see it being easier to count, average, etc the peaks
+    - Zeros: going w/ this for now b/c I don't know how much Excel and/or MatLab
+      will like importing and encountering 'NaN' while plotting -- which is 
+      probably what the primary downstream use of the data from this function
+      be. We can always have another function to change 0 >> NaN afterwards --
+      god knows we aren't programming for peak effeciency here.
+      >>> # Eliminate rows that contain only zeros
+      >>> peaks_df = peaks_df.loc[(peaks_df!=0).any(axis=1)]
+    """
+    # they will probably want detect_peaks to be physically in this file...
+    from detect_peaks import detect_peaks
+
+    # Create a df of zeros in which to store the peaks 
+    psd_no_hz = psd_df.iloc[:, range(1, len(psd_df.columns))]
+    peaks_df = pd.DataFrame(np.zeros_like(psd_no_hz),
+                           index=psd_no_hz.index, columns=psd_no_hz.columns)
+    # this df was tmp
+    psd_no_hz = ""
+    
+    # iterate detect_peaks over each psd column in the df and add the peaks to
+    # df of zeros at their index
+    for i in range(1, len(psd_df.columns)):
+        y = psd_df.iloc[:, i]
+        thresh = np.mean(y) + thresh_sd * np.std(y)
+        ind = detect_peaks(y, mph=thresh, mpd=space)
+        peaks_df.iloc[ind, i-1] = psd_df.iloc[ind, i]
+        
+    # take only rows in which any column contains a non-zero
+    peaks_df = peaks_df.loc[(peaks_df!=0).any(axis=1)]
+
+    # add the Hz col back in
+    # peaks_df.index == row names, which are same indexes from psd_df
+    tmp = psd_df.iloc[:,0].loc[peaks_df.index]
+    # note: pd.DataFrame.insert is automatically an inplace operation
+    peaks_df.insert(0, 'Hz', tmp)
+    
+    return peaks_df
+def export_peaks(peaks_df, rootpath, sensor):
+    """ Export the peaks df to a csv. Great docstring.
+
+    TODO: if this runs okay, incorporate thresh_sd into the outfile name
+    """
+    rootpathname = '/'.join((rootpath, rootpath.split('/')[-1]))
+    outfile = '_'.join((rootpathname, sensor, "psd_peaks.csv"))
+    print('Exporting PSD peaks csv for %s' %sensor)
+    print('Exporting to: %s' %outfile)
+    peaks_df.to_csv(outfile, index=False)
+def export_peaks_from_psdfile(peaks_df, infile_path):
+    """ Use if we get psd from a file instead of internally from a fft run. 
+    Export the peaks df to a csv. Great docstring.
+
+    TODO: if this runs okay, incorporate thresh_sd into the outfile name
+        ^ yeah right
+    """
+    rootpathname = strip_ext(infile_path)
+    outfile = '_'.join((rootpathname, "_peaks.csv"))
+    print('Exporting PSD peaks csv')
+    print('Exporting to: %s' %outfile)
+    peaks_df.to_csv(outfile, index=False)
+
+
+## The one where Ross tries to clean up and compartmentalize different uses 
+## for the script but introduces a bunch of global variables instead
+def main_fft_run():
+    """In a function so we can conveniently choose to not run it.
+    But the detect peaks logic/funs are in it as well so... fuck
+    """
+
+    # Report variable settings for fft/psd run
+    if args.filter_on == True:
+        print("Butterworth order 3 highpass filter is ON")
+        print("Low cutoff frequency is %d Hz" % args.cf_low)
+    else:
+        print("Butterworth highpass filter is OFF")
+
+    # Backslash is the worst path separation character
+    global rootpath
+    rootpath = folder_dialog() # user selects starting folder (QT)
+
+    # Open first force-save*.txt file we can find and read/calculate scan 
+    # paramaters from the header of that file. *assumption that params are consistant
+    # across all scans*
+    #    t: time points for time domain signal data (x-axis)
+    #    dt: time resolution (1/fs)
+    #    freq: the frequency vales (0:Fnyq Hz) for the frequency domain signal
+    # if I wasn't a hack I'd do this w/ a dict, not globals
+    global t, dt, freq
+    t, dt, freq = walk_get_params(rootpath)
+
+    # Building on our house of assumptions: the first force save file encountered
+    # is the same type (optical trap / afm) as all other files involved in this run.
+    forcesave_type = detect_forcesave_type(rootpath)
+
+    ### Optical Trap Run(s)
+    if forcesave_type['optical'] == True:
+        print('Detected Forcesave Type: Optical Trap')
+        # Very sophisticated logic for deciding which sensors to run
+        # Detect peaks logic included w/n the afm/trap logic as a (pointless
+        # and ineffective?) attempt at future proofing someone wanting to run
+        # multiple trap channels (eg x AND z) in a single execution.
+        # Also so we can lamely pass sensor id to export_peaks
+        if args.run_x_fft == True:
+            sensor = 'x'
+            psd_df = single_channel_run(sensor, 0)
+            if args.detect_peaks == True:
+                peaks_df = get_peaks(psd_df)
+                export_peaks(peaks_df, rootpath, sensor)
+
+        if args.run_y_fft == True:
+            sensor = 'y'
+            psd_df = single_channel_run(sensor, 1)
+            if args.detect_peaks == True:
+                peaks_df = get_peaks(psd_df)
+                export_peaks(peaks_df, rootpath, sensor)
+
+        if args.run_z_fft == True:
+            sensor = 'z'
+            psd_df = single_channel_run(sensor, 2)
+            if args.detect_peaks == True:
+                peaks_df = get_peaks(psd_df)
+                export_peaks(peaks_df, rootpath, sensor)
+
+    ### AFM Run
+    if forcesave_type['afm'] == True:
+        print('Detected Forcesave Type: AFM')
+        psd_df = afm_run(col=1)
+
+        ### Detect Peaks Run
+        # this is included w/n the afm/trap logic as a (probably pointless
+        # and ineffective) attempt at future proofing someone wanting to run
+        # multiple trap channels (eg x AND z) in a single execution
+        if args.detect_peaks == True:
+            peaks_df = get_peaks(psd_df)
+            # oh no we should have a generic filename/export function
+            if forcesave_type['afm'] == True:
+                sensor = 'AFM'
+            export_peaks(peaks_df, rootpath, sensor)
+
+def peaks_from_psdfile(infile_path, thresh_sd=args.thresh_sd, space=args.peak_space):
+    """ Docstring """
+    psd_df = pd.read_csv(infile_path, sep=',')
+    peaks_df = get_peaks(psd_df)
+    export_peaks_from_psdfile(peaks_df, infile_path)
 
 #------------------------------------------------- }}}
 
-
-
-# Backslash is the worst path separation character
-rootpath = folder_dialog() # user selects starting folder (QT)
-
-# Open first force-save*.txt file we can find and read/calculate scan 
-# paramaters from the header of that file. *assumption that params are consistant
-# across all scans*
-#    t: time points for time domain signal data (x-axis)
-#    dt: time resolution (1/fs)
-#    freq: the frequency vales (0:Fnyq Hz) for the frequency domain signal
-t, dt, freq = walk_get_params(rootpath)
-
-# Building on our house of assumptions: the first force save file encountered
-# is the same type (optical trap / afm) as all other files involved in this run.
-forcesave_type = detect_forcesave_type(rootpath)
-
-### Optical Trap Run(s)
-if forcesave_type['optical'] == True:
-    print('Detected Forcesave Type: Optical Trap')
-    # Very sophisticated logic for deciding which sensors to run
-    # Detect peaks logic included w/n the afm/trap logic as a (pointless
-    # and ineffective?) attempt at future proofing someone wanting to run
-    # multiple trap channels (eg x AND z) in a single execution.
-    # Also so we can lamely pass sensor id to export_peaks
-    if args.run_x_fft == True:
-        sensor = 'x'
-        psd_df = single_channel_run(sensor, 0)
-        if args.detect_peaks == True:
-            peaks_df = get_peaks(psd_df)
-            export_peaks(peaks_df, rootpath, sensor)
-
-    if args.run_y_fft == True:
-        sensor = 'y'
-        psd_df = single_channel_run(sensor, 1)
-        if args.detect_peaks == True:
-            peaks_df = get_peaks(psd_df)
-            export_peaks(peaks_df, rootpath, sensor)
-
-    if args.run_z_fft == True:
-        sensor = 'z'
-        psd_df = single_channel_run(sensor, 2)
-        if args.detect_peaks == True:
-            peaks_df = get_peaks(psd_df)
-            export_peaks(peaks_df, rootpath, sensor)
-
-### AFM Run
-if forcesave_type['afm'] == True:
-    print('Detected Forcesave Type: AFM')
-    psd_df = afm_run(col=1)
-
-    ### Detect Peaks Run
-    # this is included w/n the afm/trap logic as a (probably pointless
-    # and ineffective) attempt at future proofing someone wanting to run
-    # multiple trap channels (eg x AND z) in a single execution
-    if args.detect_peaks == True:
-        peaks_df = get_peaks(psd_df)
-        # oh no we should have a generic filename/export function
-        if forcesave_type['afm'] == True:
-            sensor = 'AFM'
-        export_peaks(peaks_df, rootpath, sensor)
-
+### Main logic
+if args.psdfile:
+    # this is confusing, I know, but lazy legacy
+    args.detect_peaks = False 
+    # print('pretend there\'s a solo peak detection run in here')
+    peaks_from_psdfile(args.psdfile)
+else:
+    main_fft_run()
 
 ### Get out while you can
 print("YOU ARE ALL FREE NOW")
