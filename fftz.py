@@ -650,7 +650,7 @@ def export_peaks_from_psdfile(peaks_df, infile_path):
         ^ yeah right
     """
     rootpathname = strip_ext(infile_path)
-    outfile = '_'.join((rootpathname, "_peaks.csv"))
+    outfile = '_'.join((rootpathname, "peaks.csv"))
     print('Exporting PSD peaks csv')
     print('Exporting to: %s' %outfile)
     peaks_df.to_csv(outfile, index=False)
