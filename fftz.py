@@ -605,7 +605,7 @@ def get_peaks(psd_df, thresh_sd=args.thresh_sd, space=args.peak_space):
       >>> peaks_df = peaks_df.loc[(peaks_df!=0).any(axis=1)]
     """
     # they will probably want detect_peaks to be physically in this file...
-    from detect_peaks import detect_peaks
+    # from detect_peaks import detect_peaks
 
     # Create a df of zeros in which to store the peaks 
     psd_no_hz = psd_df.iloc[:, range(1, len(psd_df.columns))]

@@ -3,3 +3,4 @@ old/*
 pics/*
 detect_peaks.pyc
 ideas.md
+argparse_test.py
