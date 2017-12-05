@@ -6,8 +6,8 @@ from __future__ import division, print_function
 # NOTE FOR DEV USE
 """ PSD calculator and peak detection for JPK Nanotracker 2 Data 
 
-"""
-""" note on future (python 3) division
+----
+note on future (python 3) division
 
 b/c this was in detect_peaks.py, and we should use non-ambiguous div ops
 
@@ -29,8 +29,8 @@ b/c this was in detect_peaks.py, and we should use non-ambiguous div ops
 ### SCRIPT INFO
 __author__ = 'Nick Chahley, https://github.com/pantsthecat/laser-tweezers'
 __version__ = '0.1.1x'
-__day__ = '2017-11-16'
-__codename__ = 'Rustled Ghostmood x' 
+__day__ = '2017-11-28'
+__codename__ = 'VEINS, VEINS, VEINS!' 
 print("Version %s (%s) -- \"%s\"" %(__version__, __day__, __codename__) )
 
 ### Imports and defs and arguments {{{
@@ -92,6 +92,7 @@ parser.add_argument('-pf', '--psdfile', type=str,
 args = parser.parse_args()
 
 
+### FUNCTION DEFINITIONS
 ## "Original" functions/class of the script
 class CommentedFile:
     """ Skips all lines that start with commentstring
@@ -323,10 +324,27 @@ def walk_get_params(path):
     dt = float(1/fs)
     freq = freq_calc(len(t), fs)
     return t, dt, freq
+def fileorfolder_dialog(whatyouwant='folder'):
+    """ Prompt user to select a dir (def) or file, return its path
+    Options for whatyouwant:{ 'folder', 'file' }
+    """
+    import Tkinter, tkFileDialog
+    root = Tkinter.Tk()
+    root.withdraw()
+
+    if whatyouwant == 'folder':
+        dirpath = tkFileDialog.askdirectory(parent=root,initialdir="./",
+            # dirpath will be to dir that user IS IN when they click confirm
+            title='Please select your experiment directory (be IN this folder)')
+        return dirpath
+
+    if whatyouwant == 'file':
+        # I'm SURE there is a tkFileDialog.askfile
+        return filepath
 
 
 ## Generalised run functions, script SHOULD be able to accept optical or
-# afm force-save files (unverified)
+## afm force-save files
 def detect_forcesave_type(path):  
     """ Returns a dict of optical/afm and a bool indicating if the file read
         is of that type. Walks through directory tree, terminates at first 
@@ -666,13 +684,13 @@ def export_peaks_from_psdfile(peaks_df, infile_path):
 
 ## The one where Ross tries to clean up and compartmentalize different uses 
 ## for the script but introduces a bunch of global variables instead
-def main_fft_run():
+def main_fft_run(filter_on = True, peak_detection = False):
     """In a function so we can conveniently choose to not run it.
     But the detect peaks logic/funs are in it as well so... fuck
     """
 
     # Report variable settings for fft/psd run
-    if args.filter_on == True:
+    if filter_on == True:
         print("Butterworth order 3 highpass filter is ON")
         print("Low cutoff frequency is %d Hz" % args.cf_low)
     else:
@@ -683,8 +701,8 @@ def main_fft_run():
     rootpath = folder_dialog() # user selects starting folder (QT)
 
     # Open first force-save*.txt file we can find and read/calculate scan 
-    # paramaters from the header of that file. *assumption that params are consistant
-    # across all scans*
+    # paramaters from the header of that file. *assumption that params are
+    # consistant across all scans*
     #    t: time points for time domain signal data (x-axis)
     #    dt: time resolution (1/fs)
     #    freq: the frequency vales (0:Fnyq Hz) for the frequency domain signal
@@ -692,8 +710,9 @@ def main_fft_run():
     global t, dt, freq
     t, dt, freq = walk_get_params(rootpath)
 
-    # Building on our house of assumptions: the first force save file encountered
-    # is the same type (optical trap / afm) as all other files involved in this run.
+    # Building on our house of assumptions: the first force save file
+    # encountered is the same type (optical trap / afm) as all other files
+    # involved in this run.
     forcesave_type = detect_forcesave_type(rootpath)
 
     ### Optical Trap Run(s)
@@ -703,6 +722,7 @@ def main_fft_run():
         # Detect peaks logic included w/n the afm/trap logic as a (pointless
         # and ineffective?) attempt at future proofing someone wanting to run
         # multiple trap channels (eg x AND z) in a single execution.
+        # Even though this is a feature that is not supported. 
         # Also so we can lamely pass sensor id to export_peaks
         if args.run_x_fft == True:
             sensor = 'x'
@@ -740,39 +760,130 @@ def main_fft_run():
             if forcesave_type['afm'] == True:
                 sensor = 'AFM'
             export_peaks(peaks_df, rootpath, sensor)
-
 def peaks_from_psdfile(infile_path, space=args.peak_space):
-    """ Here we try to make a dynamic windowed threshold for peak height """
+    """ WIP. Export a csv of peaks thresholded by rolling local maxima/variance 
+    Here we try to make a dynamic windowed threshold for peak height 
+    """
     psd_df = pd.read_csv(infile_path, sep=',')
     # get a df of peaks regardless of any height thresholds
-    peaks_df = get_peaks(psd_df, thresh_sd=None, space=space)
+    # peaks_df = get_peaks(psd_df, thresh_sd=None, space=space)
 
     # window size should approximate space (+/- 1)
-    k = space // 2
+    # should it? does this make any sense
+    # k = space // 2
+
+    # ideally the following function would work
+    # peaks_df = iter_windowed_peaks(peaks_df, k -- or space -- i guess)
 
     export_peaks_from_psdfile(peaks_df, infile_path)
 
-def windowed_peak_threshold(y, thresh_sd, k):
-    """ Compare each value of y to a threshold based on thresh_sd and k. parfff
+# windowed (rolling threshold) peak detection
+def windowed_peak_threshold(y, thresh_sd, space, ret_thresh = False, 
+                            ind_only = True):
+    """ Compare each value of signal y to a moving windowed threshold based on
+    thresh_sd and k.
 
-    y: pandas series w/ indexes
-    thresh_sd: threshold for window = mean(y) + thresh_sd * std(y)
-    k: window size param -- win_size = 2k + 1
+    In
+    ---
+    y : 1D array-like
+        signal, probably a pd.Series, single psd recording
+    thresh_sd : num
+        threshold for window = mean(y) + thresh_sd * std(y)
+    space : int
+        minimum peak distance (in data points), passed to detect_peaks
+        window width +/- 1 (width = space // 2 +1)
+    ret_thresh : bool, optional (def = False) 
+        also return threshold values/indexes for each peak
+        >>> peaks, mph = windowed_peak_threshold(..)
+
+    Out
+    ----
+    peaks.index : pd.Int64Index
+        indicies of the peaks
+    peaks : pd.Series
+        peaks and their indices corresponding to the index of y
+    win_mph : pd.Series
+        threshold/index for each peak. Threshold < peak 
+
+    Notes
+    -----
+    The index of y must be its rownumber/integer location. So DON'T pull y 
+    from a df where you have the index/rownames assigned to the x-axis
+    (eg, Hz)
     """
-    # figure out check for index out of bounds before adding it here
+    # k should probs just equal space, assuming that mpd is one directional NOTE check this
+    k = space
+    # k = space // 2
+    win_mph = []
+    win_ind = []
+
+    # forget about height, give me indexes of all the local maxima 
+    # based on space
+    ind = detect_peaks(y, mph = None, mpd = space)
+
+    for i in ind:
+        # if the window of i does not grab an ind out of bounds
+        if not ( (i - k < 0) or (i + k >= len(y)) ):
+            win = y[i-k : i+k+1]
+            mph = np.mean(win) + thresh_sd * np.std(win)
+            win_mph.append(mph)
+            # so that len(y[win_ind]) == len(win_mph)
+            win_ind.append(i)
+
+    # machine, pls
+    win_mph = pd.Series(win_mph, index=win_ind)
+
+    # subtract each point by its threshold
+    p = y[win_mph.index]
+    dx = p - win_mph
+    peaks = p[dx > 0]
 
     
+    if ret_thresh and not ind_only:
+        return peaks, win_mph
+    elif ind_only:
+        return peaks.index
+    else:
+        return peaks
+def get_windowed_peaks(psd, tsd, space):
+    # are dicts the fastest way to do this? **shrugs**
+    d = {}
+    # get the indexes
+    for col in psd.iloc[:, 1:].columns:
+        y = psd[col]
+        ind = windowed_peak_threshold(y, tsd, space)
+        d[col] = y.iloc[ind]
 
+    # df of peak values and NaNs
+    # indexs are rownums from psd
+    peaks = pd.DataFrame.from_dict(d)
+
+    # add x-axis (Hz) values at the peak indicies
+    # this is an inplace operation
+    x_ax = psd.iloc[:, 0]
+    peaks.insert(0, x_ax.name, x_ax)
+    return peaks 
+    
+
+## Main logic -- should this be a function? Is that structured programming
+# overkill?
+# Probs should, as it lets us include multiple "main logics" in the same
+# script and keep expanding outwards
+def main_fftpeaks_logic():
+    """ Decide whether to run solo peak detection or fft conversion.
+    """
+    if args.psdfile:
+        # this is confusing, I know, but lazy and don't want to change things rn
+        # args.detect_peaks = False # NOTE test
+        peaks_from_psdfile(infile_path = args.psdfile, space = args.peak_space)
+    else:
+        main_fft_run(filter_on = args.filter_on,
+            peak_detection = args.detect_peaks)
 #------------------------------------------------- }}}
 
-### Main logic
-if args.psdfile:
-    # this is confusing, I know, but lazy legacy
-    args.detect_peaks = False 
-    # print('pretend there\'s a solo peak detection run in here')
-    peaks_from_psdfile(args.psdfile)
-else:
-    main_fft_run()
+### NOT FUNCTION DEFINITIONS
+# run the regular script
+main_fftpeaks_logic()
 
 ### Get out while you can
 print("YOU ARE ALL FREE NOW")
