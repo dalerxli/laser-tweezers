@@ -3,7 +3,7 @@
 # Python 2.7
 from __future__ import division, print_function
 
-# NOTE FOR DEV USE
+# NOTE: FOR DEV USE
 """ PSD calculator and peak detection for JPK Nanotracker 2 Data 
 
 ----
@@ -81,11 +81,11 @@ parser.set_defaults(detect_peaks=True)
 # hence defining these before the functions
 parser.add_argument('-tsd', '--thresh_sd', type=float, default=3,
     help='Multiple of signal sd to set min peak amplitude at (def 3)')
-parser.add_argument('-mpd', '--peak_space', type=int, default=10,
+parser.add_argument('-mpd', '--peak_space', type=int, default=30,
     help='Value for detect_peaks minimum peak distance (def 10)')
 
 # for 'peak_detection_sep.py'
-parser.add_argument('-pf', '--psdfile', type=str, 
+parser.add_argument('-pf', '--psdfile', type=str, dest='psdfile', 
     help='Path/to/file. Read psd and detect peaks from this csv file, do not process any force-save files') 
 
 # Access an arg value by the syntax 'args.<argument_name>'
@@ -760,24 +760,32 @@ def main_fft_run(filter_on = True, peak_detection = False):
             if forcesave_type['afm'] == True:
                 sensor = 'AFM'
             export_peaks(peaks_df, rootpath, sensor)
-def peaks_from_psdfile(infile_path, space=args.peak_space):
+def peaks_from_psdfile(infile_path, tsd, space):
     """ WIP. Export a csv of peaks thresholded by rolling local maxima/variance 
     Here we try to make a dynamic windowed threshold for peak height 
+
+    In
+    ---
+    infile_path : str
+    tsd : num
+    space : int
+        minimum distance between peaks (in number of data points),
+        also = 1/2 window width (width = 2*space + 1)
+
+    Out
+    ---
+    writes a ',' delimed csv named '<infile_name>_peaks.csv'
+
+    Notes
+    -----
+    WILL NOT warn before overwriting a file of the same name
     """
-    psd_df = pd.read_csv(infile_path, sep=',')
-    # get a df of peaks regardless of any height thresholds
-    # peaks_df = get_peaks(psd_df, thresh_sd=None, space=space)
+    print('tsd: %d, space: %d, psdfile: %s' %(tsd, space, infile_path))
+    psd = pd.read_csv(infile_path, sep=',')
+    peaks = get_windowed_peaks(psd, tsd, space)
+    export_peaks_from_psdfile(peaks, infile_path)
 
-    # window size should approximate space (+/- 1)
-    # should it? does this make any sense
-    # k = space // 2
-
-    # ideally the following function would work
-    # peaks_df = iter_windowed_peaks(peaks_df, k -- or space -- i guess)
-
-    export_peaks_from_psdfile(peaks_df, infile_path)
-
-# windowed (rolling threshold) peak detection
+## windowed (rolling threshold) peak detection
 def windowed_peak_threshold(y, thresh_sd, space, ret_thresh = False, 
                             ind_only = True):
     """ Compare each value of signal y to a moving windowed threshold based on
@@ -793,12 +801,13 @@ def windowed_peak_threshold(y, thresh_sd, space, ret_thresh = False,
         minimum peak distance (in data points), passed to detect_peaks
         window width +/- 1 (width = space // 2 +1)
     ret_thresh : bool, optional (def = False) 
-        also return threshold values/indexes for each peak
-        >>> peaks, mph = windowed_peak_threshold(..)
+        also return threshold values/indexes for each peak (peaks, win_mph)
+    ind_only : bool, optional (def = True)
+        return peak indicies (peaks.index) only 
 
     Out
     ----
-    peaks.index : pd.Int64Index
+    peaks.index : pd.Int64Index (def)
         indicies of the peaks
     peaks : pd.Series
         peaks and their indices corresponding to the index of y
@@ -810,10 +819,11 @@ def windowed_peak_threshold(y, thresh_sd, space, ret_thresh = False,
     The index of y must be its rownumber/integer location. So DON'T pull y 
     from a df where you have the index/rownames assigned to the x-axis
     (eg, Hz)
+
+    
     """
-    # k should probs just equal space, assuming that mpd is one directional NOTE check this
+    # vestigial, k used to != space, but this makes nicer-reading syntax below
     k = space
-    # k = space // 2
     win_mph = []
     win_ind = []
 
@@ -846,6 +856,39 @@ def windowed_peak_threshold(y, thresh_sd, space, ret_thresh = False,
     else:
         return peaks
 def get_windowed_peaks(psd, tsd, space):
+    """ Find local maxima of dataframe columns using a rolling threshold.
+
+    In
+    ---
+    psd : pd.DataFrame
+        { xaxis (eg, Hz), signal 1, signal 2, etc }
+        Likely to be imported from a csv file (eg, output of a psd run of 
+        this script)
+    tsd : num
+        Number of standard deviations to set peak threshold at.
+        window_threshold = mean(y) + thresh_sd * std(y)
+    space : int
+        Minimum peak distance (in number of data points)
+        window width = 2 * space + 1
+
+    Out
+    ---
+    peaks : pd.DataFrame
+        { xaxis (eg, Hz), peaks 1, peaks 2, etc }
+        Contains values of peaks and NaNs. 
+        A row/frequency is included if 1+ signals contain a peak at this loc.
+        A 'NaN' means that no peak was found at a freq for the given signal 
+        (but that one or more other signals in the input df had a peak found
+        here)
+
+    Notes
+    -----
+    Not sure on how best to handle the missing data cells in output (for the 
+    script overall), options would be NaN, None, 0. NaN works nicely w/n
+    python, but good chance that downstream targets for this data will include
+    MatLab and Excel. Not sure how MatLab handles NaN/None (ie, blank cells)
+    and Excel.. **shudders**
+    """
     # are dicts the fastest way to do this? **shrugs**
     d = {}
     # get the indexes
@@ -863,19 +906,94 @@ def get_windowed_peaks(psd, tsd, space):
     x_ax = psd.iloc[:, 0]
     peaks.insert(0, x_ax.name, x_ax)
     return peaks 
-    
+
+## User input for window / peak parameters 
+def is_number(s):
+    """Return true if s is a int/float, false otherwise"""
+    try:
+        float(s)
+        return True
+    except ValueError:
+        return False
+def ask_tsd(arg=args.thresh_sd):
+    prompt = "\nSet standard deviation threshold for peaks."\
+           + "\nHit Enter to keep default (%d):\nthresh_sd = " % arg
+    x = raw_input(prompt)
+
+    if x == '':
+        # if user just hits enter keep default value
+        arg = arg
+    elif not is_number(x):
+        print("Error: must be a number")
+        ask_tsd(arg)
+    else:
+        arg = x
+    return float(arg)
+def ask_space(arg=args.peak_space):
+    """In the future merge this with other arg-asking function(s)
+    """
+    prompt = "\nSet space between peaks (in number of points) [window width = 2*space + 1]."\
+           + "\nHit Enter to keep default (%d):\nspace = " % arg
+    x = raw_input(prompt)
+
+    if x == '':
+        arg = arg
+    else:
+        try:
+            int(x)
+            arg = int(x)
+        except ValueError:
+            print("Error: must be a integer")
+            ask_space(arg)
+    return arg
+def user_input_vars(args): 
+    """ Ask user for window paramater values via terminal prompt
+    """
+    args.thresh_sd = ask_tsd(args.thresh_sd)
+    args.peak_space = ask_space(args.peak_space)
+    return args
+
+## Big last minute. Big danger
+def file_dialog():
+    """ Prompt user to select a file, return its path
+    In future combine with folder_dialog()
+    """
+    import Tkinter
+    from tkFileDialog import askopenfilename
+    root = Tkinter.Tk()
+    root.withdraw()
+    filepath = askopenfilename(parent=root,initialdir="./",
+                               title='Select psd file to detect peaks from',
+                               filetypes=(('CSV files', '*.csv'),
+                                          ('All files', '*.*')) )
+    return filepath
 
 ## Main logic -- should this be a function? Is that structured programming
 # overkill?
 # Probs should, as it lets us include multiple "main logics" in the same
 # script and keep expanding outwards
-def main_fftpeaks_logic():
+def main_fftpeaks_logic(force_windowed_peaks=True):
     """ Decide whether to run solo peak detection or fft conversion.
     """
-    if args.psdfile:
+    # "good enough for now"
+    if force_windowed_peaks:
+        args.psdfile = file_dialog()
+    ## Windowed peak detection path
+    if args.psdfile or force_windowed_peaks:
         # this is confusing, I know, but lazy and don't want to change things rn
         # args.detect_peaks = False # NOTE test
-        peaks_from_psdfile(infile_path = args.psdfile, space = args.peak_space)
+        # So assigning new vars works, but changing the values of args, like in
+        # the commented lines below, does not. I have no idea why
+        # Now time to make sure no function calls directly reference args.* :(
+        # ^ doesn't look like any do. We should be good enough for now
+        tsd = ask_tsd(args.thresh_sd)
+        space = ask_space(args.peak_space)
+        # args.thresh_sd = ask_tsd(args.thresh_sd)
+        # args.peak_space = ask_space(args.peak_space)
+
+        peaks_from_psdfile(infile_path = args.psdfile, tsd = tsd,
+                           space = space)
+    ## PSD calculation path
     else:
         main_fft_run(filter_on = args.filter_on,
             peak_detection = args.detect_peaks)
@@ -883,7 +1001,7 @@ def main_fftpeaks_logic():
 
 ### NOT FUNCTION DEFINITIONS
 # run the regular script
-main_fftpeaks_logic()
+main_fftpeaks_logic(force_windowed_peaks=True)
 
 ### Get out while you can
 print("YOU ARE ALL FREE NOW")
