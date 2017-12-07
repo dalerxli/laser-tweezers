@@ -28,9 +28,9 @@ b/c this was in detect_peaks.py, and we should use non-ambiguous div ops
 
 ### SCRIPT INFO
 __author__ = 'Nick Chahley, https://github.com/pantsthecat/laser-tweezers'
-__version__ = '0.1.1x'
-__day__ = '2017-11-16'
-__codename__ = 'Rustled Ghostmood x' 
+__version__ = '0.1.2'
+__day__ = '2017-12-07'
+__codename__ = 'Coconut Crab' 
 print("Version %s (%s) -- \"%s\"" %(__version__, __day__, __codename__) )
 
 ### Imports and defs and arguments {{{
@@ -45,9 +45,10 @@ import pandas as pd
 import scipy.signal
 
 ### SCRIPT ARGUMENTS (Lowpass filtering below 1Hz) salim
-# These are a bunch of useful command line flags/args the utility of which will
-# probably never see the light of day b/c (a) everyone wants the run the script
-# just by double-clicking it and (b) I have no idea how to program a gui --nikoli
+# These are a bunch of "useful" command line flags/args the utility of which
+# will probably never see the light of day b/c (a) everyone wants the run the
+# script just by double-clicking it and (b) I have no idea how to program a gui 
+# --nikoli
 parser = argparse.ArgumentParser()
 parser.add_argument('-cl', '--cf_low', type=float, default=1.,
     help='Low cutoff freq for bandpass filter in Hz (def 1Hz)')
@@ -56,7 +57,7 @@ parser.add_argument('--filter', dest='filter_on', action='store_true',
     help='def')
 parser.set_defaults(filter_on=True) #def: exported sig will also be filtered
 
-# Sensor specificity
+## Sensor specificity
 parser.add_argument('-x', '--xfft', dest='run_x_fft', action='store_true',
     help='Run FFT on X signal')
 parser.set_defaults(run_x_fft=False)
@@ -69,7 +70,7 @@ parser.add_argument('-nz', '--nozfft', dest='run_z_fft', action='store_false',
     help='DO NOT run FFT on Z signal')
 parser.set_defaults(run_z_fft=True)
 
-# Peak detection 
+## Peak detection 
 # Can turn it on or off. Please do this. Please don't make two versions, one
 # w/ detect_peaks true and one with it false. If you're going to do this at
 # least make two executables that call the one script but pass different args.
@@ -666,13 +667,13 @@ def export_peaks_from_psdfile(peaks_df, infile_path):
 
 ## The one where Ross tries to clean up and compartmentalize different uses 
 ## for the script but introduces a bunch of global variables instead
-def main_fft_run():
+def main_fft_run(filter_on = True):
     """In a function so we can conveniently choose to not run it.
     But the detect peaks logic/funs are in it as well so... fuck
     """
 
     # Report variable settings for fft/psd run
-    if args.filter_on == True:
+    if filter_on == True:
         print("Butterworth order 3 highpass filter is ON")
         print("Low cutoff frequency is %d Hz" % args.cf_low)
     else:
@@ -707,40 +708,19 @@ def main_fft_run():
         if args.run_x_fft == True:
             sensor = 'x'
             psd_df = single_channel_run(sensor, 0)
-            if args.detect_peaks == True:
-                peaks_df = get_peaks(psd_df)
-                export_peaks(peaks_df, rootpath, sensor)
 
         if args.run_y_fft == True:
             sensor = 'y'
             psd_df = single_channel_run(sensor, 1)
-            if args.detect_peaks == True:
-                peaks_df = get_peaks(psd_df)
-                export_peaks(peaks_df, rootpath, sensor)
 
         if args.run_z_fft == True:
             sensor = 'z'
             psd_df = single_channel_run(sensor, 2)
-            if args.detect_peaks == True:
-                peaks_df = get_peaks(psd_df)
-                export_peaks(peaks_df, rootpath, sensor)
 
     ### AFM Run
     if forcesave_type['afm'] == True:
         print('Detected Forcesave Type: AFM')
         psd_df = afm_run(col=1)
-
-        ### Detect Peaks Run
-        # this is included w/n the afm/trap logic as a (probably pointless
-        # and ineffective) attempt at future proofing someone wanting to run
-        # multiple trap channels (eg x AND z) in a single execution
-        if args.detect_peaks == True:
-            peaks_df = get_peaks(psd_df)
-            # oh no we should have a generic filename/export function
-            if forcesave_type['afm'] == True:
-                sensor = 'AFM'
-            export_peaks(peaks_df, rootpath, sensor)
-
 def peaks_from_psdfile(infile_path, space=args.peak_space):
     """ Here we try to make a dynamic windowed threshold for peak height """
     psd_df = pd.read_csv(infile_path, sep=',')
@@ -752,27 +732,22 @@ def peaks_from_psdfile(infile_path, space=args.peak_space):
 
     export_peaks_from_psdfile(peaks_df, infile_path)
 
-def windowed_peak_threshold(y, thresh_sd, k):
-    """ Compare each value of y to a threshold based on thresh_sd and k. parfff
-
-    y: pandas series w/ indexes
-    thresh_sd: threshold for window = mean(y) + thresh_sd * std(y)
-    k: window size param -- win_size = 2k + 1
+### Main logic
+def main_fftpeaks_logic():
+    """ Decide whether to run psd calculation (fft) or peak detection.
     """
-    # figure out check for index out of bounds before adding it here
-
-    
-
+    if args.psdfile:
+        ## Commenting out atm. Use detect_windowed_peaks.py for 
+        ## peak detection
+        # peaks_from_psdfile(args.psdfile)
+        print('NA. Please use detect_windowed_peaks.py for peak finding')
+    else:
+        main_fft_run(filter_on = args.filter_on)
 #------------------------------------------------- }}}
 
-### Main logic
-if args.psdfile:
-    # this is confusing, I know, but lazy legacy
-    args.detect_peaks = False 
-    # print('pretend there\'s a solo peak detection run in here')
-    peaks_from_psdfile(args.psdfile)
-else:
-    main_fft_run()
+### NOT FUNCTION DEFINITIONS
+# run the regular script
+main_fftpeaks_logic()
 
 ### Get out while you can
 print("YOU ARE ALL FREE NOW")

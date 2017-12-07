@@ -28,9 +28,9 @@ b/c this was in detect_peaks.py, and we should use non-ambiguous div ops
 
 ### SCRIPT INFO
 __author__ = 'Nick Chahley, https://github.com/pantsthecat/laser-tweezers'
-__version__ = '0.1.1x'
-__day__ = '2017-11-28'
-__codename__ = 'VEINS, VEINS, VEINS!' 
+__version__ = '0.1.2'
+__day__ = '2017-12-07'
+__codename__ = 'Be Kind, Rewind'
 print("Version %s (%s) -- \"%s\"" %(__version__, __day__, __codename__) )
 
 ### Imports and defs and arguments {{{
@@ -45,9 +45,10 @@ import pandas as pd
 import scipy.signal
 
 ### SCRIPT ARGUMENTS (Lowpass filtering below 1Hz) salim
-# These are a bunch of useful command line flags/args the utility of which will
-# probably never see the light of day b/c (a) everyone wants the run the script
-# just by double-clicking it and (b) I have no idea how to program a gui --nikoli
+# These are a bunch of "useful" command line flags/args the utility of which
+# will probably never see the light of day b/c (a) everyone wants the run the
+# script just by double-clicking it and (b) I have no idea how to program a gui 
+# --nikoli
 parser = argparse.ArgumentParser()
 parser.add_argument('-cl', '--cf_low', type=float, default=1.,
     help='Low cutoff freq for bandpass filter in Hz (def 1Hz)')
@@ -56,7 +57,7 @@ parser.add_argument('--filter', dest='filter_on', action='store_true',
     help='def')
 parser.set_defaults(filter_on=True) #def: exported sig will also be filtered
 
-# Sensor specificity
+## Sensor specificity
 parser.add_argument('-x', '--xfft', dest='run_x_fft', action='store_true',
     help='Run FFT on X signal')
 parser.set_defaults(run_x_fft=False)
@@ -69,22 +70,18 @@ parser.add_argument('-nz', '--nozfft', dest='run_z_fft', action='store_false',
     help='DO NOT run FFT on Z signal')
 parser.set_defaults(run_z_fft=True)
 
-# Peak detection 
+## Peak detection 
 # Can turn it on or off. Please do this. Please don't make two versions, one
 # w/ detect_peaks true and one with it false. If you're going to do this at
 # least make two executables that call the one script but pass different args.
 # These flags just want to be loved -- or even just used...
-parser.add_argument('--detect_peaks', dest='detect_peaks', action='store_true',
-    help='Output separate file of peaks above <thershold_tbd>')
 parser.set_defaults(detect_peaks=True)
-# These two args get used as defaults for the function get_peaks
-# hence defining these before the functions
 parser.add_argument('-tsd', '--thresh_sd', type=float, default=3,
     help='Multiple of signal sd to set min peak amplitude at (def 3)')
 parser.add_argument('-mpd', '--peak_space', type=int, default=30,
     help='Value for detect_peaks minimum peak distance (def 10)')
 
-# for 'peak_detection_sep.py'
+# if you were to specify peak detection input file from command line
 parser.add_argument('-pf', '--psdfile', type=str, dest='psdfile', 
     help='Path/to/file. Read psd and detect peaks from this csv file, do not process any force-save files') 
 
@@ -684,7 +681,7 @@ def export_peaks_from_psdfile(peaks_df, infile_path):
 
 ## The one where Ross tries to clean up and compartmentalize different uses 
 ## for the script but introduces a bunch of global variables instead
-def main_fft_run(filter_on = True, peak_detection = False):
+def main_fft_run(filter_on = True):
     """In a function so we can conveniently choose to not run it.
     But the detect peaks logic/funs are in it as well so... fuck
     """
@@ -727,39 +724,19 @@ def main_fft_run(filter_on = True, peak_detection = False):
         if args.run_x_fft == True:
             sensor = 'x'
             psd_df = single_channel_run(sensor, 0)
-            if args.detect_peaks == True:
-                peaks_df = get_peaks(psd_df)
-                export_peaks(peaks_df, rootpath, sensor)
 
         if args.run_y_fft == True:
             sensor = 'y'
             psd_df = single_channel_run(sensor, 1)
-            if args.detect_peaks == True:
-                peaks_df = get_peaks(psd_df)
-                export_peaks(peaks_df, rootpath, sensor)
 
         if args.run_z_fft == True:
             sensor = 'z'
             psd_df = single_channel_run(sensor, 2)
-            if args.detect_peaks == True:
-                peaks_df = get_peaks(psd_df)
-                export_peaks(peaks_df, rootpath, sensor)
 
     ### AFM Run
     if forcesave_type['afm'] == True:
         print('Detected Forcesave Type: AFM')
         psd_df = afm_run(col=1)
-
-        ### Detect Peaks Run
-        # this is included w/n the afm/trap logic as a (probably pointless
-        # and ineffective) attempt at future proofing someone wanting to run
-        # multiple trap channels (eg x AND z) in a single execution
-        if args.detect_peaks == True:
-            peaks_df = get_peaks(psd_df)
-            # oh no we should have a generic filename/export function
-            if forcesave_type['afm'] == True:
-                sensor = 'AFM'
-            export_peaks(peaks_df, rootpath, sensor)
 def peaks_from_psdfile(infile_path, tsd, space):
     """ WIP. Export a csv of peaks thresholded by rolling local maxima/variance 
     Here we try to make a dynamic windowed threshold for peak height 
@@ -916,6 +893,8 @@ def is_number(s):
     except ValueError:
         return False
 def ask_tsd(arg=args.thresh_sd):
+    """ These defaults are dumb
+    """
     prompt = "\nSet standard deviation threshold for peaks."\
            + "\nHit Enter to keep default (%d):\nthresh_sd = " % arg
     x = raw_input(prompt)
@@ -932,7 +911,8 @@ def ask_tsd(arg=args.thresh_sd):
 def ask_space(arg=args.peak_space):
     """In the future merge this with other arg-asking function(s)
     """
-    prompt = "\nSet space between peaks (in number of points) [window width = 2*space + 1]."\
+    prompt = "\nSet space between peaks (in number of data points) "\
+           + "[window width = 2*space + 1]."\
            + "\nHit Enter to keep default (%d):\nspace = " % arg
     x = raw_input(prompt)
 
@@ -946,12 +926,6 @@ def ask_space(arg=args.peak_space):
             print("Error: must be a integer")
             ask_space(arg)
     return arg
-def user_input_vars(args): 
-    """ Ask user for window paramater values via terminal prompt
-    """
-    args.thresh_sd = ask_tsd(args.thresh_sd)
-    args.peak_space = ask_space(args.peak_space)
-    return args
 
 ## Big last minute. Big danger
 def file_dialog():
@@ -973,15 +947,13 @@ def file_dialog():
 # Probs should, as it lets us include multiple "main logics" in the same
 # script and keep expanding outwards
 def main_fftpeaks_logic(force_windowed_peaks=True):
-    """ Decide whether to run solo peak detection or fft conversion.
+    """ Decide whether to run psd calculation (fft) or peak detection.
     """
     # "good enough for now"
     if force_windowed_peaks:
         args.psdfile = file_dialog()
     ## Windowed peak detection path
     if args.psdfile or force_windowed_peaks:
-        # this is confusing, I know, but lazy and don't want to change things rn
-        # args.detect_peaks = False # NOTE test
         # So assigning new vars works, but changing the values of args, like in
         # the commented lines below, does not. I have no idea why
         # Now time to make sure no function calls directly reference args.* :(
@@ -995,8 +967,7 @@ def main_fftpeaks_logic(force_windowed_peaks=True):
                            space = space)
     ## PSD calculation path
     else:
-        main_fft_run(filter_on = args.filter_on,
-            peak_detection = args.detect_peaks)
+        main_fft_run(filter_on = args.filter_on)
 #------------------------------------------------- }}}
 
 ### NOT FUNCTION DEFINITIONS
