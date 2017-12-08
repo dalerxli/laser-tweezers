@@ -44,6 +44,8 @@ import os
 import sys
 import ntpath
 from glob import glob
+import Tkinter
+import tkFileDialog as tkfd
 
 ### SCRIPT ARGUMENTS (Lowpass filtering below 1Hz) salim
 # These are a bunch of "useful" command line flags/args the utility of which
@@ -312,13 +314,14 @@ def walk_get_params(path):
     dt = float(1/fs)
     freq = freq_calc(len(t), fs)
     return t, dt, freq
+
+## File and filename manipulations
 def path_dialog(whatyouwant):
     """ Prompt user to select a dir (def) or file, return its path
     In
     ---
     whatyouwant : str opts=['folder', 'file']
     """
-    import Tkinter
     root = Tkinter.Tk()
     root.withdraw()
 
@@ -327,20 +330,53 @@ def path_dialog(whatyouwant):
     opt['initialdir'] = './'
 
     if whatyouwant == 'folder':
-        from tkFileDialog import askdirectory
-        ask_fun = askdirectory
+        ask_fun = tkfd.askdirectory
         # dirpath will be to dir that user IS IN when they click confirm
         opt['title'] = 'Please select your experiment directory (be IN this folder)'
 
     if whatyouwant == 'file':
-        from tkFileDialog import askopenfilename
-        ask_fun = askopenfilename
+        ask_fun = tkfd.askopenfilename
         opt['title'] = 'Select psd file to detect peaks from'
         opt['filetypes'] = (('CSV files', '*.csv'), ('All files', '*.*'))
 
     path = ask_fun(**opt)
     return path
+def append_filename(fn, text, sep='_'):
+    """ Append text between filename and extension separated by sep
 
+    fn : str
+        filename or path/to/filename
+    text : str
+    sep : str
+    """
+    name = strip_ext(fn)
+    ext = strip_ext(fn, ret_ext=True)
+    fn_ap = name + sep + text + ext
+    return fn_ap
+def save_dialog(default_path):
+    root = Tkinter.Tk()
+    root.withdraw()
+
+    opt = {}
+    opt['initialdir'] = os.path.dirname(default_path)
+    opt['initialfile'] = os.path.basename(default_path)
+    opt['title'] = 'Save file as'
+    opt['defaultextension'] = '.csv'
+    opt['filetypes'] = (('CSV files', '*.csv'), ('All files', '*.*'))
+
+    savefile = tkfd.asksaveasfilename(**opt)
+    return savefile
+def strip_ext(filename, ret_ext=False):
+    """ Strip extension from a filename/path, handle any '.' other than '.ext'
+    that might appear in path.
+    I'm either lazy, or not smart enough to implement this right at the start.
+    """
+    filename_strip = '.'.join((filename.split('.')[:-1]))
+    ext = filename.split('.')[-1]
+    if ret_ext == True:
+        return '.' + ext
+    else:
+        return filename_strip
 
 ## Generalised run functions, script should be able to accept optical or
 ## afm force-save files
@@ -452,17 +488,6 @@ def single_channel_run(sensor, col, channel=1):
     return df
 
 ## Peak detection suite
-def strip_ext(filename, ret_ext=False):
-    """ Strip extension from a filename/path, handle any '.' other than '.ext'
-    that might appear in path.
-    I'm either lazy, or not smart enough to implement this right at the start.
-    """
-    filename_strip = '.'.join((filename.split('.')[:-1]))
-    ext = filename.split('.')[-1]
-    if ret_ext == True:
-        return ext
-    else:
-        return filename_strip
 def detect_peaks(x, mph=None, mpd=1, threshold=0, edge='rising',
                  kpsh=False, valley=False, show=False, ax=None):
 
@@ -603,20 +628,20 @@ def detect_peaks(x, mph=None, mpd=1, threshold=0, edge='rising',
             # x = -x
         # _plot(x, mph, mpd, threshold, edge, valley, ax, ind)
     return ind
-def export_peaks_from_psdfile(peaks_df, infile_path):
+def export_peaks_from_psdfile(peaks_df, outfile):
     """ Use if we get psd from a file instead of internally from a fft run. 
     Export the peaks df to a csv. Great docstring.
 
     TODO: if this runs okay, incorporate thresh_sd into the outfile name
         ^ yeah right
     """
-    rootpathname = strip_ext(infile_path)
-    outfile = '_'.join((rootpathname, "peaks.csv"))
+    # rootpathname = strip_ext(infile_path)
+    # outfile = '_'.join((rootpathname, "peaks.csv"))
     print('Exporting PSD peaks csv')
     print('Exporting to: %s' %outfile)
     peaks_df.to_csv(outfile, index=False)
     # return outfile name to be used funs like header-writing
-    return outfile
+    # return outfile
 def windowed_peak_threshold(y, thresh_sd, space, ret_thresh = False, 
                             ind_only = True):
     """ Compare each value of signal y to a moving windowed threshold based on
@@ -819,12 +844,17 @@ def peaks_from_psdfile(infile_path, tsd, space):
     """
     print('tsd: %d, space: %d, psdfile: %s' %(tsd, space, infile_path))
     # read in data
-    psd = pd.read_csv(infile_path, sep=',')
+    psd = pd.read_csv(infile_path, sep=',', comment='#')
     # find peaks
     print('Looking for peaks...')
     peaks = get_windowed_peaks(psd, tsd, space)
+
+    # generate a default savefile name
+    outfile = append_filename(fn=infile_path, text='peaks')
+    # ask user savefile name
+    outfile = save_dialog(outfile)
     # output peaks
-    outfile = export_peaks_from_psdfile(peaks, infile_path)
+    export_peaks_from_psdfile(peaks, outfile)
     # add header to output
     add_header(outfile)
 
@@ -870,21 +900,6 @@ def ask_space(arg=args.peak_space):
             print("Error: must be a integer")
             ask_space(arg)
     return arg
-
-## Big last minute. Big danger
-def file_dialog():
-    """ Prompt user to select a file, return its path
-    In future combine with folder_dialog()
-    """
-    import Tkinter
-    from tkFileDialog import askopenfilename
-    root = Tkinter.Tk()
-    root.withdraw()
-    filepath = askopenfilename(parent=root,initialdir="./",
-                               title='Select psd file to detect peaks from',
-                               filetypes=(('CSV files', '*.csv'),
-                                          ('All files', '*.*')) )
-    return filepath
 
 ## Header addition to output file (peaks file)
 def basename_for_os():
