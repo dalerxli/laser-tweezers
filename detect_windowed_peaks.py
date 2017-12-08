@@ -28,7 +28,7 @@ b/c this was in detect_peaks.py, and we should use non-ambiguous div ops
 
 ### SCRIPT INFO
 __author__ = 'Nick Chahley, https://github.com/pantsthecat/laser-tweezers'
-__version__ = '1.1'
+__version__ = '1.1.1'
 __day__ = '2017-12-08'
 __codename__ = 'Be Kind, Rewind'
 print("Version %s (%s) -- \"%s\"" %(__version__, __day__, __codename__) )
@@ -293,16 +293,6 @@ def butter_highpass_filter(data, highcut, fs, order=3):
     b, a = butter_highpass(highcut, fs, order=order)
     y = scipy.signal.lfilter(b, a, data)
     return y
-def folder_dialog():
-    """ Prompt user to select a dir, return its path
-    """
-    import Tkinter, tkFileDialog
-    root = Tkinter.Tk()
-    root.withdraw()
-    dirpath = tkFileDialog.askdirectory(parent=root,initialdir="./",
-        # dirpath will be to dir that user IS IN when they click confirm
-        title='Please select your experiment directory (be IN this folder)')
-    return dirpath
 def walk_get_params(path):
     """ Read scan params from first force-save encountered and break, assumes 
     all files have the same parameters
@@ -322,23 +312,34 @@ def walk_get_params(path):
     dt = float(1/fs)
     freq = freq_calc(len(t), fs)
     return t, dt, freq
-def fileorfolder_dialog(whatyouwant='folder'):
+def path_dialog(whatyouwant):
     """ Prompt user to select a dir (def) or file, return its path
-    Options for whatyouwant:{ 'folder', 'file' }
+    In
+    ---
+    whatyouwant : str opts=['folder', 'file']
     """
-    import Tkinter, tkFileDialog
+    import Tkinter
     root = Tkinter.Tk()
     root.withdraw()
 
+    opt = {}
+    opt['parent'] = root
+    opt['initialdir'] = './'
+
     if whatyouwant == 'folder':
-        dirpath = tkFileDialog.askdirectory(parent=root,initialdir="./",
-            # dirpath will be to dir that user IS IN when they click confirm
-            title='Please select your experiment directory (be IN this folder)')
-        return dirpath
+        from tkFileDialog import askdirectory
+        ask_fun = askdirectory
+        # dirpath will be to dir that user IS IN when they click confirm
+        opt['title'] = 'Please select your experiment directory (be IN this folder)'
 
     if whatyouwant == 'file':
-        # I'm SURE there is a tkFileDialog.askfile
-        return filepath
+        from tkFileDialog import askopenfilename
+        ask_fun = askopenfilename
+        opt['title'] = 'Select psd file to detect peaks from'
+        opt['filetypes'] = (('CSV files', '*.csv'), ('All files', '*.*'))
+
+    path = ask_fun(**opt)
+    return path
 
 
 ## Generalised run functions, script should be able to accept optical or
@@ -737,6 +738,7 @@ def get_windowed_peaks(psd, tsd, space):
     peaks.insert(0, x_ax.name, x_ax)
     return peaks 
 
+## Primary fft/psd and peaks pathways
 ## The one where Ross tries to clean up and compartmentalize different uses 
 ## for the script but introduces a bunch of global variables instead
 def main_fft_run(filter_on = True):
@@ -753,7 +755,7 @@ def main_fft_run(filter_on = True):
 
     # Backslash is the worst path separation character
     global rootpath
-    rootpath = folder_dialog() # user selects starting folder (QT)
+    rootpath = path_dialog('folder') # user selects starting folder (TK)
 
     # Open first force-save*.txt file we can find and read/calculate scan 
     # paramaters from the header of that file. *assumption that params are
@@ -958,7 +960,7 @@ def main_fftpeaks_logic(force_windowed_peaks=True):
     """
     # "good enough for now"
     if force_windowed_peaks:
-        args.psdfile = file_dialog()
+        args.psdfile = path_dialog('file')
     ## Windowed peak detection path
     if args.psdfile or force_windowed_peaks:
         # So assigning new vars works, but changing the values of args, like in
