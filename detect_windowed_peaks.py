@@ -42,7 +42,6 @@ import pandas as pd
 import scipy.signal
 import os
 import sys
-import ntpath
 from glob import glob
 import Tkinter
 import tkFileDialog as tkfd
@@ -337,7 +336,8 @@ def path_dialog(whatyouwant):
     if whatyouwant == 'file':
         ask_fun = tkfd.askopenfilename
         opt['title'] = 'Select psd file to detect peaks from'
-        opt['filetypes'] = (('CSV files', '*.csv'), ('All files', '*.*'))
+        opt['filetypes'] = (('psd CSV files', '*_psd.csv'), 
+                           ('CSV files', '*.csv'), ('All files', '*.*') )
 
     path = ask_fun(**opt)
     return path
@@ -902,22 +902,11 @@ def ask_space(arg=args.peak_space):
     return arg
 
 ## Header addition to output file (peaks file)
-def basename_for_os():
-    """ return appropriate path.basename() function for windows or unix
-    """
-    if os.name == 'posix':
-        return os.path.basename
-    elif os.name == 'nt':
-        return ntpath.basename
-    else:
-        print('Couldn\'t identify OS, defaulting basename function to os.path')
-        return os.path.basename
 def setup_header(args):
     """ Prepare dict, list, w/e to be written to output file
 
     Could have a run_type var to distinguish b/t peaks or fft detection.
     """
-    basename = basename_for_os()
 
     # OrderedDict remembers the order keys are added to it
     import collections
@@ -930,14 +919,13 @@ def setup_header(args):
     info['daterun'] = 'Generated on: %s' % daterun
 
     # assemble script information
-    # NOTE not sure how this will work on win, and whether or not os.path
-    # or basename from basename_for_os() sould be used
     whoami = os.path.basename(sys.argv[0]) 
     info['script'] = 'Script info: %s, Version %s (%s) \"%s\"' \
                      %(whoami, __version__, __day__, __codename__)
 
     # peak detection parameters
-    info['infile'] = 'Input file: %s' % basename(args.psdfile)
+    info['infile'] = 'Input file: %s' % os.path.basename(args.psdfile)
+    info['inpath'] = 'Input file path: %s' % args.psdfile
     info['tsd'] = 'Standard deviation threshold: %d' % args.thresh_sd
     info['mpd'] = 'Space: %d' % args.peak_space
 
