@@ -28,7 +28,7 @@ b/c this was in detect_peaks.py, and we should use non-ambiguous div ops
 
 ### SCRIPT INFO
 __author__ = 'Nick Chahley, https://github.com/pantsthecat/laser-tweezers'
-__version__ = '0.1.2'
+__version__ = '0.1.2x'
 __day__ = '2017-12-07'
 __codename__ = 'Be Kind, Rewind'
 print("Version %s (%s) -- \"%s\"" %(__version__, __day__, __codename__) )
@@ -38,11 +38,12 @@ print("Version %s (%s) -- \"%s\"" %(__version__, __day__, __codename__) )
 import argparse
 import csv
 import numpy as np
-from glob import glob
-import os
-import sys
 import pandas as pd
 import scipy.signal
+import os
+import sys
+import ntpath
+from glob import glob
 
 ### SCRIPT ARGUMENTS (Lowpass filtering below 1Hz) salim
 # These are a bunch of "useful" command line flags/args the utility of which
@@ -340,7 +341,7 @@ def fileorfolder_dialog(whatyouwant='folder'):
         return filepath
 
 
-## Generalised run functions, script SHOULD be able to accept optical or
+## Generalised run functions, script should be able to accept optical or
 ## afm force-save files
 def detect_forcesave_type(path):  
     """ Returns a dict of optical/afm and a bool indicating if the file read
@@ -449,7 +450,7 @@ def single_channel_run(sensor, col, channel=1):
     # return the psd df for processing by detect_peaks
     return df
 
-## Detect Peaks suite
+## Peak detection suite
 def strip_ext(filename, ret_ext=False):
     """ Strip extension from a filename/path, handle any '.' other than '.ext'
     that might appear in path.
@@ -601,70 +602,6 @@ def detect_peaks(x, mph=None, mpd=1, threshold=0, edge='rising',
             # x = -x
         # _plot(x, mph, mpd, threshold, edge, valley, ax, ind)
     return ind
-def get_peaks(psd_df, thresh_sd=args.thresh_sd, space=args.peak_space):
-    """ Return a df containing only peaks. Minimum peak height is equal to
-    'mean + thresh_sd * sd' Adjacent columns of the same freq that do not
-    contain peaks will be 0. If no peaks are found at a given freq in any
-    columns that row will be omitted from the df.
-
-    Notes:
-    - 2 options for filling non-peak cells in the df: zeros or NaN
-    - NaN: apparently might allow for easier elimination of "empty" cells, I can
-      also see it being easier to count, average, etc the peaks
-    - Zeros: going w/ this for now b/c I don't know how much Excel and/or MatLab
-      will like importing and encountering 'NaN' while plotting -- which is 
-      probably what the primary downstream use of the data from this function
-      be. We can always have another function to change 0 >> NaN afterwards --
-      god knows we aren't programming for peak effeciency here.
-      >>> # Eliminate rows that contain only zeros
-      >>> peaks_df = peaks_df.loc[(peaks_df!=0).any(axis=1)]
-    """
-    # they will probably want detect_peaks to be physically in this file...
-    # from detect_peaks import detect_peaks
-
-    # Create a df of zeros in which to store the peaks 
-    psd_no_hz = psd_df.iloc[:, range(1, len(psd_df.columns))]
-    peaks_df = pd.DataFrame(np.zeros_like(psd_no_hz),
-                           index=psd_no_hz.index, columns=psd_no_hz.columns)
-    # this df was tmp
-    psd_no_hz = ""
-    
-    # iterate detect_peaks over each psd column in the df and add the peaks to
-    # df of zeros at their index
-    for i in range(1, len(psd_df.columns)):
-        y = psd_df.iloc[:, i]
-        if thresh_sd == None:
-            # detect all peaks regardless of height and worry about a dynamic
-            # thresh comparison later. Also don't worry about using time 
-            # effectively, b/c this is slow AF
-            thresh=None
-            print('Peak detection by space only. This will take a while')
-        else:
-            # static peak height threshold
-            thresh = np.mean(y) + thresh_sd * np.std(y)
-        ind = detect_peaks(y, mph=thresh, mpd=space)
-        peaks_df.iloc[ind, i-1] = psd_df.iloc[ind, i]
-        
-    # take only rows in which any column contains a non-zero
-    peaks_df = peaks_df.loc[(peaks_df!=0).any(axis=1)]
-
-    # add the Hz col back in
-    # peaks_df.index == row names, which are same indexes from psd_df
-    tmp = psd_df.iloc[:,0].loc[peaks_df.index]
-    # note: pd.DataFrame.insert is automatically an inplace operation
-    peaks_df.insert(0, 'Hz', tmp)
-    
-    return peaks_df
-def export_peaks(peaks_df, rootpath, sensor):
-    """ Export the peaks df to a csv. Great docstring.
-
-    TODO: if this runs okay, incorporate thresh_sd into the outfile name
-    """
-    rootpathname = '/'.join((rootpath, rootpath.split('/')[-1]))
-    outfile = '_'.join((rootpathname, sensor, "psd_peaks.csv"))
-    print('Exporting PSD peaks csv for %s' %sensor)
-    print('Exporting to: %s' %outfile)
-    peaks_df.to_csv(outfile, index=False)
 def export_peaks_from_psdfile(peaks_df, infile_path):
     """ Use if we get psd from a file instead of internally from a fft run. 
     Export the peaks df to a csv. Great docstring.
@@ -677,92 +614,8 @@ def export_peaks_from_psdfile(peaks_df, infile_path):
     print('Exporting PSD peaks csv')
     print('Exporting to: %s' %outfile)
     peaks_df.to_csv(outfile, index=False)
-
-
-## The one where Ross tries to clean up and compartmentalize different uses 
-## for the script but introduces a bunch of global variables instead
-def main_fft_run(filter_on = True):
-    """In a function so we can conveniently choose to not run it.
-    But the detect peaks logic/funs are in it as well so... fuck
-    """
-
-    # Report variable settings for fft/psd run
-    if filter_on == True:
-        print("Butterworth order 3 highpass filter is ON")
-        print("Low cutoff frequency is %d Hz" % args.cf_low)
-    else:
-        print("Butterworth highpass filter is OFF")
-
-    # Backslash is the worst path separation character
-    global rootpath
-    rootpath = folder_dialog() # user selects starting folder (QT)
-
-    # Open first force-save*.txt file we can find and read/calculate scan 
-    # paramaters from the header of that file. *assumption that params are
-    # consistant across all scans*
-    #    t: time points for time domain signal data (x-axis)
-    #    dt: time resolution (1/fs)
-    #    freq: the frequency vales (0:Fnyq Hz) for the frequency domain signal
-    # if I wasn't a hack I'd do this w/ a dict, not globals
-    global t, dt, freq
-    t, dt, freq = walk_get_params(rootpath)
-
-    # Building on our house of assumptions: the first force save file
-    # encountered is the same type (optical trap / afm) as all other files
-    # involved in this run.
-    forcesave_type = detect_forcesave_type(rootpath)
-
-    ### Optical Trap Run(s)
-    if forcesave_type['optical'] == True:
-        print('Detected Forcesave Type: Optical Trap')
-        # Very sophisticated logic for deciding which sensors to run
-        # Detect peaks logic included w/n the afm/trap logic as a (pointless
-        # and ineffective?) attempt at future proofing someone wanting to run
-        # multiple trap channels (eg x AND z) in a single execution.
-        # Even though this is a feature that is not supported. 
-        # Also so we can lamely pass sensor id to export_peaks
-        if args.run_x_fft == True:
-            sensor = 'x'
-            psd_df = single_channel_run(sensor, 0)
-
-        if args.run_y_fft == True:
-            sensor = 'y'
-            psd_df = single_channel_run(sensor, 1)
-
-        if args.run_z_fft == True:
-            sensor = 'z'
-            psd_df = single_channel_run(sensor, 2)
-
-    ### AFM Run
-    if forcesave_type['afm'] == True:
-        print('Detected Forcesave Type: AFM')
-        psd_df = afm_run(col=1)
-def peaks_from_psdfile(infile_path, tsd, space):
-    """ WIP. Export a csv of peaks thresholded by rolling local maxima/variance 
-    Here we try to make a dynamic windowed threshold for peak height 
-
-    In
-    ---
-    infile_path : str
-    tsd : num
-    space : int
-        minimum distance between peaks (in number of data points),
-        also = 1/2 window width (width = 2*space + 1)
-
-    Out
-    ---
-    writes a ',' delimed csv named '<infile_name>_peaks.csv'
-
-    Notes
-    -----
-    WILL NOT warn before overwriting a file of the same name
-    """
-    print('tsd: %d, space: %d, psdfile: %s' %(tsd, space, infile_path))
-    psd = pd.read_csv(infile_path, sep=',')
-    peaks = get_windowed_peaks(psd, tsd, space)
-    export_peaks_from_psdfile(peaks, infile_path)
-
-## windowed (rolling threshold) peak detection
+    # return outfile name to be used funs like header-writing
+    return outfile
 def windowed_peak_threshold(y, thresh_sd, space, ret_thresh = False, 
                             ind_only = True):
     """ Compare each value of signal y to a moving windowed threshold based on
@@ -833,7 +686,7 @@ def windowed_peak_threshold(y, thresh_sd, space, ret_thresh = False,
     else:
         return peaks
 def get_windowed_peaks(psd, tsd, space):
-    """ Find local maxima of dataframe columns using a rolling threshold.
+    """ Return df of local maxima of dataframe columns using a rolling threshold
 
     In
     ---
@@ -883,6 +736,95 @@ def get_windowed_peaks(psd, tsd, space):
     x_ax = psd.iloc[:, 0]
     peaks.insert(0, x_ax.name, x_ax)
     return peaks 
+
+## The one where Ross tries to clean up and compartmentalize different uses 
+## for the script but introduces a bunch of global variables instead
+def main_fft_run(filter_on = True):
+    """In a function so we can conveniently choose to not run it.
+    But the detect peaks logic/funs are in it as well so... fuck
+    """
+
+    # Report variable settings for fft/psd run
+    if filter_on == True:
+        print("Butterworth order 3 highpass filter is ON")
+        print("Low cutoff frequency is %d Hz" % args.cf_low)
+    else:
+        print("Butterworth highpass filter is OFF")
+
+    # Backslash is the worst path separation character
+    global rootpath
+    rootpath = folder_dialog() # user selects starting folder (QT)
+
+    # Open first force-save*.txt file we can find and read/calculate scan 
+    # paramaters from the header of that file. *assumption that params are
+    # consistant across all scans*
+    #    t: time points for time domain signal data (x-axis)
+    #    dt: time resolution (1/fs)
+    #    freq: the frequency vales (0:Fnyq Hz) for the frequency domain signal
+    # if I wasn't a hack I'd do this w/ a dict, not globals
+    global t, dt, freq
+    t, dt, freq = walk_get_params(rootpath)
+
+    # Building on our house of assumptions: the first force save file
+    # encountered is the same type (optical trap / afm) as all other files
+    # involved in this run.
+    forcesave_type = detect_forcesave_type(rootpath)
+
+    ### Optical Trap Run(s)
+    if forcesave_type['optical'] == True:
+        print('Detected Forcesave Type: Optical Trap')
+        # Very sophisticated logic for deciding which sensors to run
+        # Detect peaks logic included w/n the afm/trap logic as a (pointless
+        # and ineffective?) attempt at future proofing someone wanting to run
+        # multiple trap channels (eg x AND z) in a single execution.
+        # Even though this is a feature that is not supported. 
+        # Also so we can lamely pass sensor id to export_peaks
+        if args.run_x_fft == True:
+            sensor = 'x'
+            psd_df = single_channel_run(sensor, 0)
+
+        if args.run_y_fft == True:
+            sensor = 'y'
+            psd_df = single_channel_run(sensor, 1)
+
+        if args.run_z_fft == True:
+            sensor = 'z'
+            psd_df = single_channel_run(sensor, 2)
+
+    ### AFM Run
+    if forcesave_type['afm'] == True:
+        print('Detected Forcesave Type: AFM')
+        psd_df = afm_run(col=1)
+def peaks_from_psdfile(infile_path, tsd, space):
+    """ Export a csv of peaks thresholded by rolling local maxima/variance 
+    Here we try to make a dynamic windowed threshold for peak height 
+
+    In
+    ---
+    infile_path : str
+    tsd : num
+    space : int
+        minimum distance between peaks (in number of data points),
+        also = 1/2 window width (width = 2*space + 1)
+
+    Out
+    ---
+    writes a ',' delimed csv named '<infile_name>_peaks.csv'
+
+    Notes
+    -----
+    WILL NOT warn before overwriting a file of the same name
+    """
+    print('tsd: %d, space: %d, psdfile: %s' %(tsd, space, infile_path))
+    # read in data
+    psd = pd.read_csv(infile_path, sep=',')
+    # find peaks
+    print('Looking for peaks...')
+    peaks = get_windowed_peaks(psd, tsd, space)
+    # output peaks
+    outfile = export_peaks_from_psdfile(peaks, infile_path)
+    # add header to output
+    add_header(outfile)
 
 ## User input for window / peak parameters 
 def is_number(s):
@@ -941,6 +883,71 @@ def file_dialog():
                                filetypes=(('CSV files', '*.csv'),
                                           ('All files', '*.*')) )
     return filepath
+
+## Header addition to output file (peaks file)
+def basename_for_os():
+    """ return appropriate path.basename() function for windows or unix
+    """
+    if os.name == 'posix':
+        return os.path.basename
+    elif os.name == 'nt':
+        return ntpath.basename
+    else:
+        print('Couldn\'t identify OS, defaulting basename function to os.path')
+        return os.path.basename
+def setup_header(args):
+    """ Prepare dict, list, w/e to be written to output file
+
+    Could have a run_type var to distinguish b/t peaks or fft detection.
+    """
+    basename = basename_for_os()
+
+    # OrderedDict remembers the order keys are added to it
+    import collections
+    info = collections.OrderedDict()
+
+    # get a time for script execution
+    import datetime
+    now = datetime.datetime.now()
+    daterun = now.strftime('%Y-%m-%d %H:%M:%S')
+    info['daterun'] = 'Generated on: %s' % daterun
+
+    # assemble script information
+    # NOTE not sure how this will work on win, and whether or not os.path
+    # or basename from basename_for_os() sould be used
+    whoami = os.path.basename(sys.argv[0]) 
+    info['script'] = 'Script info: %s, Version %s (%s) \"%s\"' \
+                     %(whoami, __version__, __day__, __codename__)
+
+    # peak detection parameters
+    info['infile'] = 'Input file: %s' % basename(args.psdfile)
+    info['tsd'] = 'Standard deviation threshold: %d' % args.thresh_sd
+    info['mpd'] = 'Space: %d' % args.peak_space
+
+    return info
+def write_header(info, outfile, commentchar='#'):
+    """ Prepend header to outfile containing useful info.
+    info : dict
+        each entry is a line of the header to be printed
+    outfile : str
+    commentchar : str
+    """
+    with open(outfile, 'r') as f:
+        tmpfile = ''.join((outfile, '.tmp'))
+        with open(tmpfile, 'w') as f2:
+            # write the header
+            for k in info.keys():
+                f2.write(commentchar + info[k] + '\n')
+
+            # write the data
+            f2.write(f.read())
+    os.rename(tmpfile, outfile)
+    # apparently this leaves no .tmp to cleanup?
+def add_header(outfile):
+    """ Setup and prepend header to outfile (peaks file only atm)
+    """
+    info = setup_header(args)
+    write_header(info, outfile)
 
 ## Main logic -- should this be a function? Is that structured programming
 # overkill?
