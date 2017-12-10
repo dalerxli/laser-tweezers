@@ -8,9 +8,6 @@ from __future__ import division, print_function
 
 ----
 note on future (python 3) division
-
-b/c this was in detect_peaks.py, and we should use non-ambiguous div ops
-
 '//' "floor division" operator (python 2 def for ints)
 '/' "true division" operator (python 2 def for floats)
 
@@ -24,7 +21,6 @@ b/c this was in detect_peaks.py, and we should use non-ambiguous div ops
 >>> float(5 // 2)
     2.0
 """
-
 
 ### SCRIPT INFO
 __author__ = 'Nick Chahley, https://github.com/pantsthecat/laser-tweezers'
@@ -763,101 +759,6 @@ def get_windowed_peaks(psd, tsd, space):
     peaks.insert(0, x_ax.name, x_ax)
     return peaks 
 
-## Primary fft/psd and peaks pathways
-## The one where Ross tries to clean up and compartmentalize different uses 
-## for the script but introduces a bunch of global variables instead
-def main_fft_run(filter_on = True):
-    """In a function so we can conveniently choose to not run it.
-    But the detect peaks logic/funs are in it as well so... fuck
-    """
-
-    # Report variable settings for fft/psd run
-    if filter_on == True:
-        print("Butterworth order 3 highpass filter is ON")
-        print("Low cutoff frequency is %d Hz" % args.cf_low)
-    else:
-        print("Butterworth highpass filter is OFF")
-
-    # Backslash is the worst path separation character
-    global rootpath
-    rootpath = path_dialog('folder') # user selects starting folder (TK)
-
-    # Open first force-save*.txt file we can find and read/calculate scan 
-    # paramaters from the header of that file. *assumption that params are
-    # consistant across all scans*
-    #    t: time points for time domain signal data (x-axis)
-    #    dt: time resolution (1/fs)
-    #    freq: the frequency vales (0:Fnyq Hz) for the frequency domain signal
-    # if I wasn't a hack I'd do this w/ a dict, not globals
-    global t, dt, freq
-    t, dt, freq = walk_get_params(rootpath)
-
-    # Building on our house of assumptions: the first force save file
-    # encountered is the same type (optical trap / afm) as all other files
-    # involved in this run.
-    forcesave_type = detect_forcesave_type(rootpath)
-
-    ### Optical Trap Run(s)
-    if forcesave_type['optical'] == True:
-        print('Detected Forcesave Type: Optical Trap')
-        # Very sophisticated logic for deciding which sensors to run
-        # Detect peaks logic included w/n the afm/trap logic as a (pointless
-        # and ineffective?) attempt at future proofing someone wanting to run
-        # multiple trap channels (eg x AND z) in a single execution.
-        # Even though this is a feature that is not supported. 
-        # Also so we can lamely pass sensor id to export_peaks
-        if args.run_x_fft == True:
-            sensor = 'x'
-            psd_df = single_channel_run(sensor, 0)
-
-        if args.run_y_fft == True:
-            sensor = 'y'
-            psd_df = single_channel_run(sensor, 1)
-
-        if args.run_z_fft == True:
-            sensor = 'z'
-            psd_df = single_channel_run(sensor, 2)
-
-    ### AFM Run
-    if forcesave_type['afm'] == True:
-        print('Detected Forcesave Type: AFM')
-        psd_df = afm_run(col=1)
-def peaks_from_psdfile(infile_path, tsd, space):
-    """ Export a csv of peaks thresholded by rolling local maxima/variance 
-    Here we try to make a dynamic windowed threshold for peak height 
-
-    In
-    ---
-    infile_path : str
-    tsd : num
-    space : int
-        minimum distance between peaks (in number of data points),
-        also = 1/2 window width (width = 2*space + 1)
-
-    Out
-    ---
-    writes a ',' delimed csv named '<infile_name>_peaks.csv'
-
-    Notes
-    -----
-    WILL NOT warn before overwriting a file of the same name
-    """
-    print('tsd: %d, space: %d, psdfile: %s' %(tsd, space, infile_path))
-    # read in data
-    psd = pd.read_csv(infile_path, sep=',', comment='#')
-    # find peaks
-    print('Looking for peaks...')
-    peaks = get_windowed_peaks(psd, tsd, space)
-
-    # generate a default savefile name
-    outfile = append_filename(fn=infile_path, text='peaks')
-    # ask user savefile name
-    outfile = save_dialog(outfile)
-    # output peaks
-    export_peaks_from_psdfile(peaks, outfile)
-    # add header to output
-    add_header(outfile)
-
 ## User input for window / peak parameters 
 def is_number(s):
     """Return true if s is a int/float, false otherwise"""
@@ -954,10 +855,105 @@ def add_header(outfile):
     info = setup_header(args)
     write_header(info, outfile)
 
+## Primary fft/psd and peaks pathways
+## The one where Ross tries to clean up and compartmentalize different uses 
+## for the script but introduces a bunch of global variables instead
+def main_fft_run(filter_on = True):
+    """In a function so we can conveniently choose to not run it.
+    But the detect peaks logic/funs are in it as well so... fuck
+    """
+
+    # Report variable settings for fft/psd run
+    if filter_on == True:
+        print("Butterworth order 3 highpass filter is ON")
+        print("Low cutoff frequency is %d Hz" % args.cf_low)
+    else:
+        print("Butterworth highpass filter is OFF")
+
+    # Backslash is the worst path separation character
+    global rootpath
+    rootpath = path_dialog('folder') # user selects starting folder (TK)
+
+    # Open first force-save*.txt file we can find and read/calculate scan 
+    # paramaters from the header of that file. *assumption that params are
+    # consistant across all scans*
+    #    t: time points for time domain signal data (x-axis)
+    #    dt: time resolution (1/fs)
+    #    freq: the frequency vales (0:Fnyq Hz) for the frequency domain signal
+    # if I wasn't a hack I'd do this w/ a dict, not globals
+    global t, dt, freq
+    t, dt, freq = walk_get_params(rootpath)
+
+    # Building on our house of assumptions: the first force save file
+    # encountered is the same type (optical trap / afm) as all other files
+    # involved in this run.
+    forcesave_type = detect_forcesave_type(rootpath)
+
+    ### Optical Trap Run(s)
+    if forcesave_type['optical'] == True:
+        print('Detected Forcesave Type: Optical Trap')
+        # Very sophisticated logic for deciding which sensors to run
+        # Detect peaks logic included w/n the afm/trap logic as a (pointless
+        # and ineffective?) attempt at future proofing someone wanting to run
+        # multiple trap channels (eg x AND z) in a single execution.
+        # Even though this is a feature that is not supported. 
+        # Also so we can lamely pass sensor id to export_peaks
+        if args.run_x_fft == True:
+            sensor = 'x'
+            psd_df = single_channel_run(sensor, 0)
+
+        if args.run_y_fft == True:
+            sensor = 'y'
+            psd_df = single_channel_run(sensor, 1)
+
+        if args.run_z_fft == True:
+            sensor = 'z'
+            psd_df = single_channel_run(sensor, 2)
+
+    ### AFM Run
+    if forcesave_type['afm'] == True:
+        print('Detected Forcesave Type: AFM')
+        psd_df = afm_run(col=1)
+def peaks_from_psdfile(infile_path, tsd, space):
+    """ Export a csv of peaks thresholded by rolling local maxima/variance 
+    Here we try to make a dynamic windowed threshold for peak height 
+
+    In
+    ---
+    infile_path : str
+    tsd : num
+    space : int
+        minimum distance between peaks (in number of data points),
+        also = 1/2 window width (width = 2*space + 1)
+
+    Out
+    ---
+    writes a ',' delimed csv named '<infile_name>_peaks.csv'
+
+    Notes
+    -----
+    WILL NOT warn before overwriting a file of the same name
+    """
+    print('tsd: %d, space: %d, psdfile: %s' %(tsd, space, infile_path))
+    # read in data
+    psd = pd.read_csv(infile_path, sep=',', comment='#')
+    # find peaks
+    print('Looking for peaks...')
+    peaks = get_windowed_peaks(psd, tsd, space)
+
+    # generate a default savefile name
+    outfile = append_filename(fn=infile_path, text='peaks')
+    # ask user savefile name
+    outfile = save_dialog(outfile)
+    # output peaks
+    export_peaks_from_psdfile(peaks, outfile)
+    # add header to output
+    add_header(outfile)
+
 ## Main logic -- should this be a function? Is that structured programming
-# overkill?
-# Probs should, as it lets us include multiple "main logics" in the same
-# script and keep expanding outwards
+## overkill?
+## Probs should, as it lets us include multiple "main logics" in the same
+## script and keep expanding outwards
 def main_fftpeaks_logic(force_windowed_peaks=True):
     """ Decide whether to run psd calculation (fft) or peak detection.
     """
