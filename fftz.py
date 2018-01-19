@@ -29,9 +29,9 @@ b/c this was in detect_peaks.py, and we should use non-ambiguous div ops
 
 ### SCRIPT INFO
 __author__ = 'Nick Chahley, https://github.com/pantsthecat/laser-tweezers'
-__version__ = '1.1.1'
-__day__ = '2017-12-08'
-__codename__ = 'Coconut Crab' 
+__version__ = '1.2'
+__day__ = '2018-01-19'
+__codename__ = 'Weeping Angel' 
 print("Version %s (%s) -- \"%s\"" %(__version__, __day__, __codename__) )
 
 ### Imports and defs and arguments {{{
