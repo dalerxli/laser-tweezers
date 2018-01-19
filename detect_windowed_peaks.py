@@ -102,14 +102,6 @@ class CommentedFile:
         return line
     def __iter__(self):
         return self
-# def dirsep():
-    # """ This function is no longer used, right?
-    # """
-    # if sys.platform.lower().startswith('win'):
-        # dirsep = '\\'
-    # else:
-        # dirsep = '/'
-    # return dirsep
 def get_cwd():
     ### Check OS switch 
     if sys.platform.lower().startswith('win'):
