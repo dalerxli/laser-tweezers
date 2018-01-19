@@ -24,9 +24,9 @@ note on future (python 3) division
 
 ### SCRIPT INFO
 __author__ = 'Nick Chahley, https://github.com/pantsthecat/laser-tweezers'
-__version__ = '1.1.1'
-__day__ = '2017-12-08'
-__codename__ = 'Be Kind, Rewind'
+__version__ = '1.2'
+__day__ = '2018-01-19'
+__codename__ = 'Weeping Angel'
 print("Version %s (%s) -- \"%s\"" %(__version__, __day__, __codename__) )
 
 ### Imports and defs and arguments {{{
