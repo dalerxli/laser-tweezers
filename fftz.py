@@ -377,30 +377,33 @@ def afm_run(sensor='AFM', col=1):
     ### Init data dictionaries
     global psd_d
     psd_d = {}
-    psd_d['Hz'] = freq
+    psd_d['Hz'] = p['freq']
     global sig_d
     sig_d = {}
-    sig_d['Time'] = t
+    sig_d['Time'] = p['t']
         
     ### Attempted os looping
-    for subdir, dirs, files in os.walk(rootpath):
+    for subdir, dirs, files in os.walk(p['rootpath']):
         os.chdir(subdir)
         scan_name = get_cwd()
         print(' '.join(("Entering", scan_name)))
         scan_transformation(glob('force-save*.txt'), scan_name, col=col)
 
     ### Make and export dataframes
-    rootpathname = '/'.join((rootpath, rootpath.split('/')[-1]))
+    # rootpathname = '/'.join((rootpath, rootpath.split('/')[-1]))
+    rootpathname = '/'.join((p['rootpath'], p['rootpath'].split('/')[-1]))
     df = dict_to_df(psd_d)
     outfile = '_'.join((rootpathname, sensor, "psd.csv"))
     print('Exporting PSD csv for %s' %sensor)
     df.to_csv(outfile, index=False)
+    header_psd_add(outfile, args, p)
 
     sdf = dict_to_df(sig_d)
     outfile = '_'.join((rootpathname, sensor, "sig.csv"))
     print('Exporting raw signal csv for %s' %sensor)
     sdf.to_csv(outfile, index=False)
 
+    # TODO rm this
     # return the psd df for processing by detect_peaks
     return df
 
@@ -689,56 +692,6 @@ def single_channel_run(sensor, col, channel=1):
     # return the psd df for processing by detect_peaks -- which we dont really
     # do anymore, but GEFN?
     return df
-def main_fft_run(filter_on=True):
-    """In a function so we can conveniently choose to not run it.
-    But the detect peaks logic/funs are in it as well so... fuck
-    """
-
-    # Report variable settings for fft/psd run
-    if filter_on == True:
-        print("Butterworth order 3 highpass filter is ON")
-        print("Low cutoff frequency is %d Hz" % args.cf_low)
-    else:
-        print("Butterworth highpass filter is OFF")
-
-    # dict to store settings, params and pass 'em to others
-    global p
-    p = {}
-    p['rootpath'] = path_dialog('folder') # user selects starting folder (QT)
-
-    # Open first force-save*.txt file we can find and read/calculate scan 
-    # paramaters from the header of that file. *assumption that params are consistant
-    # across all scans*
-    p = walk_get_params_2(p['rootpath'], p)
-
-    # Assume the first force save file encountered is the same type (optical
-    # trap / afm) as all other files involved in this run.
-    p['forcesave_type'] = detect_forcesave_type(p['rootpath'])
-
-    ### Optical Trap Run(s)
-    if p['forcesave_type']['optical'] == True:
-        print('Detected Forcesave Type: Optical Trap')
-        # Very sophisticated logic for deciding which sensors to run
-        # Detect peaks logic included w/n the afm/trap logic as a (pointless
-        # and ineffective?) attempt at future proofing someone wanting to run
-        # multiple trap channels (eg x AND z) in a single execution.
-        # Also so we can lamely pass sensor id to export_peaks
-        if args.run_x_fft == True:
-            p['sensor'] = 'x'
-            psd_df = single_channel_run(p['sensor'], 0)
-
-        if args.run_y_fft == True:
-            p['sensor'] = 'y'
-            psd_df = single_channel_run(p['sensor'], 1)
-
-        if args.run_z_fft == True:
-            p['sensor'] = 'z'
-            psd_df = single_channel_run(p['sensor'], 2)
-
-    ### AFM Run
-    elif p['forcesave_type']['afm'] == True:
-        print('Detected Forcesave Type: AFM')
-        psd_df = afm_run(col=1)
 
 
 ## Output Header
@@ -809,18 +762,22 @@ def header_psd_setup(args, p):
 
     info['file-description'] = 'PSD OUTPUT'
 
-    # get a time for script execution
+    ## get a time for script execution
     import datetime
     now = datetime.datetime.now()
     daterun = now.strftime('%Y-%m-%d %H:%M:%S')
     info['daterun'] = 'date: %s' % daterun
 
-    # assemble script information
+    ## assemble script information
     whoami = os.path.basename(sys.argv[0]) 
     info['script'] = 'script.info: %s %s (%s) \"%s\"' \
                      %(whoami, __version__, __day__, __codename__)
 
-    # psd calculation parameters
+    ## psd calculation parameters
+    # convert fst from dict to list, list should be len 1
+    forcesave_type = [k for k in p['forcesave_type'].keys() \
+                      if p['forcesave_type'][k]]
+    info['forcesave-type'] = 'forcesave-type: %s' % ', '.join(forcesave_type)
     info['fs'] = 'sampling-rate-hz: %d' % p['fs']
 
     info['filter-on'] = 'filter: %s' % args.filter_on
@@ -865,14 +822,70 @@ def walk_get_params_2(path, p):
 ### Main logic
 def main_fftpeaks_logic():
     """ Decide whether to run psd calculation (fft) or peak detection.
+
+    This function doesn't need to exist anymore since peak detection moved to
+    seperate script (detect_windowed_peaks).
     """
     if args.psdfile:
         ## Commenting out atm. Use detect_windowed_peaks.py for 
         ## peak detection
         # peaks_from_psdfile(args.psdfile)
-        print('NA. Please use detect_windowed_peaks.py for peak finding')
+        print('Depriciated. Please use detect_windowed_peaks.py for peak finding')
     else:
         main_fft_run(filter_on = args.filter_on)
+def main_fft_run(filter_on=True):
+    """ Setup and run either optical or afm psd calculation.
+    
+    In a function so we can conveniently choose to not run it.
+    But the detect peaks logic/funs are in it as well so... fuck
+    """
+
+    # Report variable settings for fft/psd run
+    if filter_on == True:
+        print("Butterworth order 3 highpass filter is ON")
+        print("Low cutoff frequency is %d Hz" % args.cf_low)
+    else:
+        print("Butterworth highpass filter is OFF")
+
+    # dict to store settings, params and pass 'em to others
+    global p
+    p = {}
+    p['rootpath'] = path_dialog('folder') # user selects starting folder (QT)
+
+    # Open first force-save*.txt file we can find and read/calculate scan 
+    # paramaters from the header of that file. *assumption that params are consistant
+    # across all scans*
+    p = walk_get_params_2(p['rootpath'], p)
+
+    # Assume the first force save file encountered is the same type (optical
+    # trap / afm) as all other files involved in this run.
+    p['forcesave_type'] = detect_forcesave_type(p['rootpath'])
+
+    ### Optical Trap Run(s)
+    if p['forcesave_type']['optical'] == True:
+        print('Detected Forcesave Type: Optical Trap')
+        # Very sophisticated logic for deciding which sensors to run
+        # Detect peaks logic included w/n the afm/trap logic as a (pointless
+        # and ineffective?) attempt at future proofing someone wanting to run
+        # multiple trap channels (eg x AND z) in a single execution.
+        # Also so we can lamely pass sensor id to export_peaks
+        if args.run_x_fft == True:
+            p['sensor'] = 'x'
+            psd_df = single_channel_run(p['sensor'], 0)
+
+        if args.run_y_fft == True:
+            p['sensor'] = 'y'
+            psd_df = single_channel_run(p['sensor'], 1)
+
+        if args.run_z_fft == True:
+            p['sensor'] = 'z'
+            psd_df = single_channel_run(p['sensor'], 2)
+
+    ### AFM Run
+    elif p['forcesave_type']['afm'] == True:
+        print('Detected Forcesave Type: AFM')
+        p['sensor'] = 'AFM'
+        psd_df = afm_run(sensor=p['sensor'], col=1)
 #------------------------------------------------- }}}
 
 ### NOT FUNCTION DEFINITIONS
