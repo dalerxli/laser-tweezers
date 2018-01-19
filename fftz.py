@@ -711,6 +711,9 @@ def header_write(info, outfile, commentchar='# '):
 
             # write the data
             f2.write(f.read())
+    # hotfix for WindowsError 183: won't rename if file already exists
+    if os.name == 'nt':
+        os.remove(outfile)
     os.rename(tmpfile, outfile)
     # apparently this leaves no .tmp to cleanup?
 def header_get_params_psd(f, p):
