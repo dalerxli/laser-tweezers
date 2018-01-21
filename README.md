@@ -1,35 +1,21 @@
 _Disclaimer: no actual lasers, just their data._
 
-Python scripts for handling a specific use case of the JPK force-sensing opical trap/Nanotracker 2.
+Python scripts for handling a specific use case of the JPK force-sensing optical trap/Nanotracker 2.
 
 ----
-# Notices
-- The script appears to work for both optical trap _and_ afm data. It detects this based off of the id string in the force-save file: `# bead-id` (optical) vs `# approachID` (afm). As such, I'm using a single script (`fftz.py`) for development going forward. 
-
 # Current State
 - 2 scripts:
   1. `fftz.py`
-    - calculate PSD from force-save txt files
-  1. `detect_windowed_peaks.py`
+    - calculate PSD from force-save txt files (AFM or optical data)
+  2. `detect_windowed_peaks.py`
     - find peaks in PSD files outputed by `fftz.py`
 
 ----
-# Goals
-- Implement peak detection using a moving windowed mean/sd threshold
-
 # Roadmap
-1. ~~Copy static mean `detect_peaks` implementation from `fftz_afm.py` to `fftz_trap.py`.~~
-3. ~~Include code for `detect_peaks.py` in fftz scripts~~
-2. ~~Rolling window threshold for peak detection~~
-4. Windows test
-5. Gui parameter selection? _(someday?)_
+- Add logging functions to `detect_windowed_peaks.py`
 
 ----
-# Non-essential but would be nice
-- A freaking stout log
-- When run from Windows explorer, if script crashes/exits, some way of preserving stout (or even just the error message) instead of the terminal window just dissapearing
-- Add headers to output files including things like
-  - detected force-save type, Fs, scan length, date, etc
-  - filter and peak parameters
-  - date run, script version
+# Maybe-Someday Goals
+- **Some sort of usage manual**
 - When printing paths to stout, make them relative to toplevel experiment directory
+- Gui, or even console-based, parameter selection
