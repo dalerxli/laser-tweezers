@@ -884,7 +884,6 @@ def main():
 if __name__ == "__main__":
     try:
         main()
-        raise ValueError("bad end")
         logging.info("YOU ARE ALL FREE NOW")
 
     except Exception as e:
