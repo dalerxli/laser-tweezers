@@ -9,8 +9,8 @@ from __future__ import division, print_function
 
 ### SCRIPT INFO
 __author__ = 'Nick Chahley, https://github.com/pantsthecat/laser-tweezers'
-__version__ = '1.2'
-__day__ = '2018-01-19'
+__version__ = '1.2.1'
+__day__ = '2018-01-21'
 __codename__ = 'Weeping Angel' 
 
 ### Imports and defs and arguments {{{
