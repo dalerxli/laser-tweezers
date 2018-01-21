@@ -1,31 +1,11 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 # Python 2.7
-# NOTE IN MIDDLE OF CHANGING OVER TO p{} AS SETTINGS STORE
 from __future__ import division, print_function
 
-# NOTE FOR DEV USE
 """ PSD calculator and peak detection for JPK Nanotracker 2 Data 
 
 """
-""" note on future (python 3) division
-
-b/c this was in detect_peaks.py, and we should use non-ambiguous div ops
-
-'//' "floor division" operator (python 2 def for ints)
-'/' "true division" operator (python 2 def for floats)
-
->>> from __future__ import division
->>> 5 // 2 
-    2
->>> 5 / 2
-    2.5
->>> int(5 / 2)
-    2
->>> float(5 // 2)
-    2.0
-"""
-
 
 ### SCRIPT INFO
 __author__ = 'Nick Chahley, https://github.com/pantsthecat/laser-tweezers'
@@ -43,8 +23,10 @@ import pandas as pd
 import scipy.signal
 import os
 import sys
-import ntpath
 from glob import glob
+import logging
+import collections
+import datetime
 
 ### SCRIPT ARGUMENTS (Lowpass filtering below 1Hz) salim
 # These are a bunch of "useful" command line flags/args the utility of which
@@ -86,10 +68,6 @@ parser.add_argument('-tsd', '--thresh_sd', type=float, default=3,
     help='Multiple of signal sd to set min peak amplitude at (def 3)')
 parser.add_argument('-mpd', '--peak_space', type=int, default=10,
     help='Value for detect_peaks minimum peak distance (def 10)')
-
-# for 'peak_detection_sep.py'
-parser.add_argument('-pf', '--psdfile', type=str, 
-    help='Path/to/file. Read psd and detect peaks from this csv file, do not process any force-save files') 
 
 # Access an arg value by the syntax 'args.<argument_name>'
 args = parser.parse_args()
@@ -760,13 +738,10 @@ def header_psd_setup(args, p):
     # TODO consolidate psd/peaks variants (simple ifcase should do)
 
     # OrderedDict remembers the order keys are added to it
-    import collections
     info = collections.OrderedDict()
-
     info['file-description'] = 'PSD OUTPUT'
 
     ## get a time for script execution
-    import datetime
     now = datetime.datetime.now()
     daterun = now.strftime('%Y-%m-%d %H:%M:%S')
     info['daterun'] = 'date: %s' % daterun
@@ -813,7 +788,7 @@ def walk_get_params_2(path, p):
             infile = glob('force-save*.txt')
             if len(infile) > 0:
                 print('Reading Scan Parameters from dir: %s' %subdir)
-                params = header_get_params_psd(infile[0], p)
+                p = header_get_params_psd(infile[0], p)
                 success == True
                 break
     # used by psd_powerplay(N, dt)
@@ -822,26 +797,22 @@ def walk_get_params_2(path, p):
     return p
 
 
-### Main logic
-def main_fftpeaks_logic():
-    """ Decide whether to run psd calculation (fft) or peak detection.
-
-    This function doesn't need to exist anymore since peak detection moved to
-    seperate script (detect_windowed_peaks).
-    """
-    if args.psdfile:
-        ## Commenting out atm. Use detect_windowed_peaks.py for 
-        ## peak detection
-        # peaks_from_psdfile(args.psdfile)
-        print('Depriciated. Please use detect_windowed_peaks.py for peak finding')
-    else:
-        main_fft_run(filter_on = args.filter_on)
+### Pseudo Mains 
 def main_fft_run(filter_on=True):
     """ Setup and run either optical or afm psd calculation.
     
     In a function so we can conveniently choose to not run it.
     But the detect peaks logic/funs are in it as well so... fuck
     """
+    # dict to store settings, params and pass 'em to others
+    global p
+    p = {}
+    p['rootpath'] = path_dialog('folder') # user selects starting folder (QT)
+
+    logger_setup(p) # need rootpath to set logfilename
+    now = datetime.datetime.now()
+    daterun = now.strftime('%Y-%m-%d')
+    logging.info('Today is %s' % daterun)
 
     # Report variable settings for fft/psd run
     if filter_on == True:
@@ -849,11 +820,6 @@ def main_fft_run(filter_on=True):
         print("Low cutoff frequency is %d Hz" % args.cf_low)
     else:
         print("Butterworth highpass filter is OFF")
-
-    # dict to store settings, params and pass 'em to others
-    global p
-    p = {}
-    p['rootpath'] = path_dialog('folder') # user selects starting folder (QT)
 
     # Open first force-save*.txt file we can find and read/calculate scan 
     # paramaters from the header of that file. *assumption that params are consistant
@@ -889,11 +855,59 @@ def main_fft_run(filter_on=True):
         print('Detected Forcesave Type: AFM')
         p['sensor'] = 'AFM'
         psd_df = afm_run(sensor=p['sensor'], col=1)
+def logger_setup(p):
+    """ Basic setup for crash logger
+    """
+    logfile = '/'.join((p['rootpath'], os.path.basename(__file__) ))
+    logfile = logfile + '.log'
+    datefmt = '%H:%M:%S'
+    logfmt = '%(asctime)s %(levelname)-8s %(message)s'
+    logging.basicConfig(filename=logfile, level=logging.DEBUG,
+                        filemode='w', # overwrite log file if exists
+                        format=logfmt, datefmt=datefmt)
+
+    ## Console Handler 
+    ## Have logger print to stdout as well as log file
+    ch = logging.StreamHandler(sys.stdout)
+    chfmt = logging.Formatter('%(asctime)s: %(message)s', datefmt)
+    ch.setFormatter(chfmt)
+    logging.getLogger().addHandler(ch)
 #------------------------------------------------- }}}
 
-### NOT FUNCTION DEFINITIONS
-# run the regular script
-main_fftpeaks_logic()
 
-### Get out while you can
-print("YOU ARE ALL FREE NOW")
+### Main Proper
+def main():
+    """ Main function to log in case of crash
+    """
+    main_fft_run(filter_on = args.filter_on)
+## log in case if main function crashes
+if __name__ == "__main__":
+    try:
+        main()
+        raise ValueError("bad end")
+        print("YOU ARE ALL FREE NOW")
+
+    except Exception as e:
+        logging.exception("Main crashed. Error: %s", e)
+        print('ERROR: Main crashed, see .log file.\nError: %s' % e)
+
+
+### Misc Notes
+# TODO move this to some part of the README, or a note-for-future dev file
+""" note on future (python 3) division
+
+b/c this was in detect_peaks.py, and we should use non-ambiguous div ops
+
+'//' "floor division" operator (python 2 def for ints)
+'/' "true division" operator (python 2 def for floats)
+
+>>> from __future__ import division
+>>> 5 // 2 
+    2
+>>> 5 / 2
+    2.5
+>>> int(5 / 2)
+    2
+>>> float(5 // 2)
+    2.0
+"""
