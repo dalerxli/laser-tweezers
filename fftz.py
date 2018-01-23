@@ -22,10 +22,10 @@ import pandas as pd
 import scipy.signal
 import os
 import sys
-from glob import glob
-import logging
-import collections
 import datetime
+import collections
+import logging
+from glob import glob
 
 ### SCRIPT ARGUMENTS (Lowpass filtering below 1Hz) salim
 # These are a bunch of "useful" command line flags/args the utility of which
@@ -146,7 +146,7 @@ def read_forcesave(f, col=2):
         try:
             sig.append(row[col])
         except IndexError:
-            logging.error("IndexError. Something is up here:\n %s" % row)
+            logger.error("IndexError. Something is up here:\n %s" % row)
     
     # List of strings >> list of floats
     sig = map(float, sig)   #float = numbers with decimal points
@@ -207,7 +207,7 @@ def scan_transformation(infile, scan_name, col=2):
             psd, sig_corrected = psd_powerplay(sig, p['dt'])
             psd_d[colnames[i]] = psd 
             sig_d[colnames[i]] = sig_corrected
-            logging.info(' '.join(("Finished:", colnames[i])))
+            logger.info(' '.join(("Finished:", colnames[i])))
 def dict_to_df(d):
     """ Make df from dict with Hz as 1st col and alpha-num order after
         This fun is mostly about formatting colnames
@@ -244,7 +244,7 @@ def get_params(f):
     """ Returns: t, fs, date (ndarray, float, string)
         Maybe use date for start of file name?
     """
-    logging.info("Read params from file %s" %f)
+    logger.info("Read params from file %s" %f)
 
     # TODO exception handling for TypeError
     T = float(get_match_val(f, "settings.segment.1.duration:")) # (s)
@@ -330,7 +330,7 @@ def detect_forcesave_type(path):
             os.chdir(subdir)
             infile = glob('force-save*.txt')
             if len(infile) > 0:
-                logging.info('Infering force-save type from dir: %s\n file: %s'\
+                logger.info('Infering force-save type from dir: %s\n file: %s'\
                       %(subdir,infile[0]))
 
                 search = open(infile[0], 'r')
@@ -349,7 +349,7 @@ def afm_run(sensor='AFM', col=1):
         changed in the event of an AFM force-save detection
         Col we're interested in is col 1 (vDisplacement)
     """
-    logging.info('Beginning an AFM run')
+    logger.info('Beginning an AFM run')
     ### Init data dictionaries
     global psd_d
     psd_d = {}
@@ -362,7 +362,7 @@ def afm_run(sensor='AFM', col=1):
     for subdir, dirs, files in os.walk(p['rootpath']):
         os.chdir(subdir)
         scan_name = get_cwd()
-        logging.info(' '.join(("Entering", scan_name)))
+        logger.info(' '.join(("Entering", scan_name)))
         scan_transformation(glob('force-save*.txt'), scan_name, col=col)
 
     ### Make and export dataframes
@@ -370,13 +370,13 @@ def afm_run(sensor='AFM', col=1):
     rootpathname = '/'.join((p['rootpath'], p['rootpath'].split('/')[-1]))
     df = dict_to_df(psd_d)
     outfile = '_'.join((rootpathname, sensor, "psd.csv"))
-    logging.info('Exporting PSD csv for %s' %sensor)
+    logger.info('Exporting PSD csv for %s' %sensor)
     df.to_csv(outfile, index=False)
     header_psd_add(outfile, args, p)
 
     sdf = dict_to_df(sig_d)
     outfile = '_'.join((rootpathname, sensor, "sig.csv"))
-    logging.info('Exporting raw signal csv for %s' %sensor)
+    logger.info('Exporting raw signal csv for %s' %sensor)
     sdf.to_csv(outfile, index=False)
 
     # TODO rm this
@@ -572,7 +572,7 @@ def get_peaks(psd_df, thresh_sd=args.thresh_sd, space=args.peak_space):
             # thresh comparison later. Also don't worry about using time 
             # effectively, b/c this is slow AF
             thresh=None
-            logging.info('Peak detection by space only. This will take a while')
+            logger.info('Peak detection by space only. This will take a while')
         else:
             # static peak height threshold
             thresh = np.mean(y) + thresh_sd * np.std(y)
@@ -596,8 +596,8 @@ def export_peaks(peaks_df, rootpath, sensor):
     """
     rootpathname = '/'.join((rootpath, rootpath.split('/')[-1]))
     outfile = '_'.join((rootpathname, sensor, "psd_peaks.csv"))
-    logging.info('Exporting PSD peaks csv for %s' %sensor)
-    logging.info('Exporting to: %s' %outfile)
+    logger.info('Exporting PSD peaks csv for %s' %sensor)
+    logger.info('Exporting to: %s' %outfile)
     peaks_df.to_csv(outfile, index=False)
 def export_peaks_from_psdfile(peaks_df, infile_path):
     """ Use if we get psd from a file instead of internally from a fft run. 
@@ -608,8 +608,8 @@ def export_peaks_from_psdfile(peaks_df, infile_path):
     """
     rootpathname = strip_ext(infile_path)
     outfile = '_'.join((rootpathname, "peaks.csv"))
-    logging.info('Exporting PSD peaks csv')
-    logging.info('Exporting to: %s' %outfile)
+    logger.info('Exporting PSD peaks csv')
+    logger.info('Exporting to: %s' %outfile)
     peaks_df.to_csv(outfile, index=False)
 
 
@@ -636,7 +636,7 @@ def single_channel_run(sensor, col, channel=1):
     # TODO p{} is a arg
     # TODO sensor >> p['sensor'], could still keep this the same and just
     # call with single_channel_run(p['sensor'], col)
-    logging.info('\nBeginning single run for channel %s' %sensor + str(channel))
+    logger.info('\nBeginning single run for channel %s' %sensor + str(channel))
     ### Init data dictionaries
     global psd_d
     psd_d = {}
@@ -649,20 +649,20 @@ def single_channel_run(sensor, col, channel=1):
     for subdir, dirs, files in os.walk(p['rootpath']):
         os.chdir(subdir)
         scan_name = get_cwd()
-        logging.info(' '.join(("Entering", scan_name)))
+        logger.info(' '.join(("Entering", scan_name)))
         scan_transformation(glob('force-save*.txt'), scan_name, col=col)
 
     ### Make and export dataframes
     rootpathname = '/'.join((p['rootpath'], p['rootpath'].split('/')[-1]))
     df = dict_to_df(psd_d)
     outfile = '_'.join((rootpathname, sensor, "psd.csv"))
-    logging.info('Exporting PSD csv for %s' %sensor)
+    logger.info('Exporting PSD csv for %s' %sensor)
     df.to_csv(outfile, index=False)
     header_psd_add(outfile, args, p)
 
     sdf = dict_to_df(sig_d)
     outfile = '_'.join((rootpathname, sensor, "sig.csv"))
-    logging.info('Exporting raw signal csv for %s' %sensor)
+    logger.info('Exporting raw signal csv for %s' %sensor)
     sdf.to_csv(outfile, index=False)
 
     # return the psd df for processing by detect_peaks -- which we dont really
@@ -699,7 +699,7 @@ def header_get_params_psd(f, p):
     - date could be different across forcesave files
     """
     
-    logging.info("Read params from file %s" %f)
+    logger.info("Read params from file %s" %f)
 
     # TODO exception handling for TypeError
     T = float(get_match_val(f, "settings.segment.1.duration:")) # (s)
@@ -785,7 +785,7 @@ def walk_get_params_2(path, p):
             os.chdir(subdir)
             infile = glob('force-save*.txt')
             if len(infile) > 0:
-                logging.info('Reading Scan Parameters from dir: %s' %subdir)
+                logger.info('Reading Scan Parameters from dir: %s' %subdir)
                 p = header_get_params_psd(infile[0], p)
                 success == True
                 break
@@ -796,30 +796,18 @@ def walk_get_params_2(path, p):
 
 
 ### Pseudo Mains 
-def main_fft_run(filter_on=True):
+def main_fft_run(p, filter_on=True):
     """ Setup and run either optical or afm psd calculation.
     
     In a function so we can conveniently choose to not run it.
     But the detect peaks logic/funs are in it as well so... fuck
     """
-    # dict to store settings, params and pass 'em to others
-    global p
-    p = {}
-    p['rootpath'] = path_dialog('folder') # user selects starting folder (QT)
-
-    logger_setup(p) # need rootpath to set logfilename
-    logging.info("Version %s (%s) -- \"%s\"" \
-                 %(__version__, __day__, __codename__) )
-    now = datetime.datetime.now()
-    daterun = now.strftime('%Y-%m-%d')
-    logging.info('Today is %s' % daterun)
-
     # Report variable settings for fft/psd run
     if filter_on == True:
-        logging.info("Butterworth order 3 highpass filter is ON")
-        logging.info("Low cutoff frequency is %d Hz" % args.cf_low)
+        logger.info("Butterworth order 3 highpass filter is ON")
+        logger.info("Low cutoff frequency is %d Hz" % args.cf_low)
     else:
-        logging.info("Butterworth highpass filter is OFF")
+        logger.info("Butterworth highpass filter is OFF")
 
     # Open first force-save*.txt file we can find and read/calculate scan 
     # paramaters from the header of that file. *assumption that params are consistant
@@ -832,7 +820,7 @@ def main_fft_run(filter_on=True):
 
     ### Optical Trap Run(s)
     if p['forcesave_type']['optical'] == True:
-        logging.info('Detected Forcesave Type: Optical Trap')
+        logger.info('Detected Forcesave Type: Optical Trap')
         # Very sophisticated logic for deciding which sensors to run
         # Detect peaks logic included w/n the afm/trap logic as a (pointless
         # and ineffective?) attempt at future proofing someone wanting to run
@@ -852,7 +840,7 @@ def main_fft_run(filter_on=True):
 
     ### AFM Run
     elif p['forcesave_type']['afm'] == True:
-        logging.info('Detected Forcesave Type: AFM')
+        logger.info('Detected Forcesave Type: AFM')
         p['sensor'] = 'AFM'
         psd_df = afm_run(sensor=p['sensor'], col=1)
 def logger_setup(p):
@@ -871,23 +859,48 @@ def logger_setup(p):
     ch = logging.StreamHandler(sys.stdout)
     chfmt = logging.Formatter('%(asctime)s: %(message)s', datefmt)
     ch.setFormatter(chfmt)
-    logging.getLogger().addHandler(ch)
+    # logger.getLogger().addHandler(ch)
+    
+    ## !! new testing
+    ## boilerplate, "allows per module configuration" 
+    logger = logging.getLogger(__name__)
+    logger.addHandler(ch)
+
+    return logger
+def premain_setup():
+    """ Define params dict p, and setup logger
+    """
+    # dict to store settings, params and pass 'em to others
+    # global p
+    p = {}
+    p['rootpath'] = path_dialog('folder') # user selects starting folder (QT)
+
+    logger = logger_setup(p) # need rootpath to set logfilename
+    logger.info("Version %s (%s) -- \"%s\"" \
+                 %(__version__, __day__, __codename__) )
+    now = datetime.datetime.now()
+    daterun = now.strftime('%Y-%m-%d')
+    logger.info('Today is %s' % daterun)
+
+    return p, logger
+
 #------------------------------------------------- }}}
 
 
 ### Main Proper
-def main():
+def main(p):
     """ Main function to log in case of crash
     """
-    main_fft_run(filter_on = args.filter_on)
+    main_fft_run(p, filter_on = args.filter_on)
 ## log in case if main function crashes
 if __name__ == "__main__":
+    p, logger = premain_setup()
     try:
-        main()
-        logging.info("YOU ARE ALL FREE NOW")
+        main(p)
+        logger.info("YOU ARE ALL FREE NOW")
 
     except Exception as e:
-        logging.exception("Main crashed. Error: %s", e)
+        logger.exception("Main crashed. Error: %s", e)
 
 
 ### Misc Notes
