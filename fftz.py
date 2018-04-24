@@ -281,9 +281,15 @@ def butter_highpass_filter(data, highcut, fs, order=3):
     return y
 def path_dialog(whatyouwant):
     """ Prompt user to select a dir (def) or file, return its path
+
     In
     ---
     whatyouwant : str opts=['folder', 'file']
+
+    Out
+    ---
+    path : str, Absolute path to file
+
     """
     import Tkinter
     root = Tkinter.Tk()
@@ -843,6 +849,22 @@ def main_fft_run(p, filter_on=True):
         logger.info('Detected Forcesave Type: AFM')
         p['sensor'] = 'AFM'
         psd_df = afm_run(sensor=p['sensor'], col=1)
+def premain_setup():
+    """ Define params dict p, and setup logger
+    """
+    # dict to store settings, params and pass 'em to others
+    # global p
+    p = {}
+    p['rootpath'] = path_dialog('folder') # user selects starting folder (QT)
+
+    logger = logger_setup(p) # need rootpath to set logfilename
+    logger.info("Version %s (%s) -- \"%s\"" \
+                 %(__version__, __day__, __codename__) )
+    now = datetime.datetime.now()
+    daterun = now.strftime('%Y-%m-%d')
+    logger.info('Today is %s' % daterun)
+
+    return p, logger
 def logger_setup(p):
     """ Basic setup for crash logger
     """
@@ -867,22 +889,6 @@ def logger_setup(p):
     logger.addHandler(ch)
 
     return logger
-def premain_setup():
-    """ Define params dict p, and setup logger
-    """
-    # dict to store settings, params and pass 'em to others
-    # global p
-    p = {}
-    p['rootpath'] = path_dialog('folder') # user selects starting folder (QT)
-
-    logger = logger_setup(p) # need rootpath to set logfilename
-    logger.info("Version %s (%s) -- \"%s\"" \
-                 %(__version__, __day__, __codename__) )
-    now = datetime.datetime.now()
-    daterun = now.strftime('%Y-%m-%d')
-    logger.info('Today is %s' % daterun)
-
-    return p, logger
 
 #------------------------------------------------- }}}
 
@@ -892,7 +898,8 @@ def main(p):
     """ Main function to log in case of crash
     """
     main_fft_run(p, filter_on = args.filter_on)
-## log in case if main function crashes
+
+## log in case main function crashes
 if __name__ == "__main__":
     p, logger = premain_setup()
     try:

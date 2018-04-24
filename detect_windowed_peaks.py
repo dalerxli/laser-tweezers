@@ -3,31 +3,20 @@
 # Python 2.7
 from __future__ import division, print_function
 
-# NOTE: FOR DEV USE
 """ PSD calculator and peak detection for JPK Nanotracker 2 Data 
 
+TODO
 ----
-note on future (python 3) division
-'//' "floor division" operator (python 2 def for ints)
-'/' "true division" operator (python 2 def for floats)
-
->>> from __future__ import division
->>> 5 // 2 
-    2
->>> 5 / 2
-    2.5
->>> int(5 / 2)
-    2
->>> float(5 // 2)
-    2.0
+    ~~1. switch over to p[param] b/h, confirm not busted~~
+    2. implement logger
+    3. read header from psd input file
 """
 
 ### SCRIPT INFO
 __author__ = 'Nick Chahley, https://github.com/pantsthecat/laser-tweezers'
-__version__ = '1.2'
-__day__ = '2018-01-19'
+__version__ = '1.2x'
+__day__ = '2018-03-27'
 __codename__ = 'Weeping Angel'
-print("Version %s (%s) -- \"%s\"" %(__version__, __day__, __codename__) )
 
 ### Imports and defs and arguments {{{
 # -------------------------------------------------
@@ -41,6 +30,8 @@ import sys
 from glob import glob
 import Tkinter
 import tkFileDialog as tkfd
+import logging
+import datetime
 
 ### SCRIPT ARGUMENTS (Lowpass filtering below 1Hz) salim
 # These are a bunch of "useful" command line flags/args the utility of which
@@ -148,8 +139,8 @@ def read_forcesave(f, col=2):
         try:
             sig.append(row[col])
         except IndexError:
-            print("IndexError. Something is up here: ")
-            print(row)
+            logger.info("IndexError. Something is up here: ")
+            logger.info(row)
     
     # List of strings >> list of floats
     sig = map(float, sig)   #float = numbers with decimal points
@@ -210,7 +201,7 @@ def scan_transformation(infile, scan_name, col=2):
             psd, sig_corrected = psd_powerplay(sig, dt)
             psd_d[colnames[i]] = psd 
             sig_d[colnames[i]] = sig_corrected
-            print(' '.join(("Finished:", colnames[i])))
+            logger.info(' '.join(("Finished:", colnames[i])))
 def dict_to_df(d):
     """ Make df from dict with Hz as 1st col and alpha-num order after
         This fun is mostly about formatting colnames
@@ -247,7 +238,7 @@ def get_params(f):
     """ Returns: t, fs, date (ndarray, float, string)
         Maybe use date for start of file name?
     """
-    print("Read params from file %s" %f)
+    logger.info("Read params from file %s" %f)
 
     # TODO exception handling for TypeError
     T = float(get_match_val(f, "settings.segment.1.duration:")) # (s)
@@ -293,7 +284,7 @@ def walk_get_params(path):
             os.chdir(subdir)
             infile = glob('force-save*.txt')
             if len(infile) > 0:
-                print('Reading Scan Parameters from dir: %s' %subdir)
+                logger.info('Reading Scan Parameters from dir: %s' %subdir)
                 t, fs, date = get_params(infile[0])
                 success == True
                 break
@@ -387,7 +378,7 @@ def detect_forcesave_type(path):
             os.chdir(subdir)
             infile = glob('force-save*.txt')
             if len(infile) > 0:
-                print('Infering force-save type from dir: %s\n file: %s'\
+                logger.info('Infering force-save type from dir: %s\n file: %s'\
                       %(subdir,infile[0]))
 
                 search = open(infile[0], 'r')
@@ -406,7 +397,7 @@ def afm_run(sensor='AFM', col=1):
         changed in the event of an AFM force-save detection
         Col we're interested in is col 1 (vDisplacement)
     """
-    print('\nBeginning an AFM run')
+    logger.info('\nBeginning an AFM run')
     ### Init data dictionaries
     global psd_d
     psd_d = {}
@@ -419,19 +410,19 @@ def afm_run(sensor='AFM', col=1):
     for subdir, dirs, files in os.walk(rootpath):
         os.chdir(subdir)
         scan_name = get_cwd()
-        print(' '.join(("Entering", scan_name)))
+        logger.info(' '.join(("Entering", scan_name)))
         scan_transformation(glob('force-save*.txt'), scan_name, col=col)
 
     ### Make and export dataframes
     rootpathname = '/'.join((rootpath, rootpath.split('/')[-1]))
     df = dict_to_df(psd_d)
     outfile = '_'.join((rootpathname, sensor, "psd.csv"))
-    print('Exporting PSD csv for %s' %sensor)
+    logger.info('Exporting PSD csv for %s' %sensor)
     df.to_csv(outfile, index=False)
 
     sdf = dict_to_df(sig_d)
     outfile = '_'.join((rootpathname, sensor, "sig.csv"))
-    print('Exporting raw signal csv for %s' %sensor)
+    logger.info('Exporting raw signal csv for %s' %sensor)
     sdf.to_csv(outfile, index=False)
 
     # return the psd df for processing by detect_peaks
@@ -444,7 +435,7 @@ def single_channel_run(sensor, col, channel=1):
         channel is always 1 right now, but maybe someone'll want 2 also in the
         future 
     """
-    print('\nBeginning single run for channel %s' %sensor + str(channel))
+    logger.info('\nBeginning single run for channel %s' %sensor + str(channel))
     ### Init data dictionaries
     global psd_d
     psd_d = {}
@@ -457,19 +448,19 @@ def single_channel_run(sensor, col, channel=1):
     for subdir, dirs, files in os.walk(rootpath):
         os.chdir(subdir)
         scan_name = get_cwd()
-        print(' '.join(("Entering", scan_name)))
+        logger.info(' '.join(("Entering", scan_name)))
         scan_transformation(glob('force-save*.txt'), scan_name, col=col)
 
     ### Make and export dataframes
     rootpathname = '/'.join((rootpath, rootpath.split('/')[-1]))
     df = dict_to_df(psd_d)
     outfile = '_'.join((rootpathname, sensor, "psd.csv"))
-    print('Exporting PSD csv for %s' %sensor)
+    logger.info('Exporting PSD csv for %s' %sensor)
     df.to_csv(outfile, index=False)
 
     sdf = dict_to_df(sig_d)
     outfile = '_'.join((rootpathname, sensor, "sig.csv"))
-    print('Exporting raw signal csv for %s' %sensor)
+    logger.info('Exporting raw signal csv for %s' %sensor)
     sdf.to_csv(outfile, index=False)
 
     # return the psd df for processing by detect_peaks
@@ -535,7 +526,7 @@ def detect_peaks(x, mph=None, mpd=1, threshold=0, edge='rising',
     >>> x[60:81] = np.nan
     >>> # detect all peaks and plot data
     >>> ind = detect_peaks(x, show=True)
-    >>> print(ind)
+    >>> logger.info(ind)
 
     >>> x = np.sin(2*np.pi*5*np.linspace(0, 1, 200)) + np.random.randn(200)/5
     >>> # set minimum peak height = 0 and minimum peak distance = 20
@@ -625,8 +616,8 @@ def export_peaks_from_psdfile(peaks_df, outfile):
     """
     # rootpathname = strip_ext(infile_path)
     # outfile = '_'.join((rootpathname, "peaks.csv"))
-    print('Exporting PSD peaks csv')
-    print('Exporting to: %s' %outfile)
+    logger.info('Exporting PSD peaks csv')
+    logger.info('Exporting to: %s' %outfile)
     peaks_df.to_csv(outfile, index=False)
     # return outfile name to be used funs like header-writing
     # return outfile
@@ -770,7 +761,7 @@ def ask_tsd(arg=args.thresh_sd):
         # if user just hits enter keep default value
         arg = arg
     elif not is_number(x):
-        print("Error: must be a number")
+        logger.info("Error: must be a number")
         ask_tsd(arg)
     else:
         arg = x
@@ -790,12 +781,12 @@ def ask_space(arg=args.peak_space):
             int(x)
             arg = int(x)
         except ValueError:
-            print("Error: must be a integer")
+            logger.info("Error: must be a integer")
             ask_space(arg)
     return arg
 
 ## Header addition to output file (peaks file)
-def setup_header(args):
+def setup_header(args, output_type='peaks'):
     """ Prepare dict, list, w/e to be written to output file
 
     Could have a run_type var to distinguish b/t peaks or fft detection.
@@ -804,6 +795,10 @@ def setup_header(args):
     # OrderedDict remembers the order keys are added to it
     import collections
     info = collections.OrderedDict()
+
+    # Top of header
+    if output_type == 'peaks':
+        info['output_type'] = 'PEAK DETECTION OUTPUT'
 
     # get a time for script execution
     import datetime
@@ -817,10 +812,10 @@ def setup_header(args):
                      %(whoami, __version__, __day__, __codename__)
 
     # peak detection parameters
-    info['infile'] = 'Input file: %s' % os.path.basename(args.psdfile)
-    info['inpath'] = 'Input file path: %s' % args.psdfile
-    info['tsd'] = 'Standard deviation threshold: %d' % args.thresh_sd
-    info['mpd'] = 'Space: %d' % args.peak_space
+    info['psdfile'] = 'Input file: %s' % os.path.basename(p['psdfile'])
+    info['inpath'] = 'Input file path: %s' % p['psdfile']
+    info['tsd'] = 'Standard deviation threshold: %d' % p['tsd']
+    info['mpd'] = 'Space: %d' % p['space']
 
     return info
 def write_header(info, outfile, commentchar='#'):
@@ -857,10 +852,10 @@ def main_fft_run(filter_on = True):
 
     # Report variable settings for fft/psd run
     if filter_on == True:
-        print("Butterworth order 3 highpass filter is ON")
-        print("Low cutoff frequency is %d Hz" % args.cf_low)
+        logger.info("Butterworth order 3 highpass filter is ON")
+        logger.info("Low cutoff frequency is %d Hz" % args.cf_low)
     else:
-        print("Butterworth highpass filter is OFF")
+        logger.info("Butterworth highpass filter is OFF")
 
     # Backslash is the worst path separation character
     global rootpath
@@ -883,7 +878,7 @@ def main_fft_run(filter_on = True):
 
     ### Optical Trap Run(s)
     if forcesave_type['optical'] == True:
-        print('Detected Forcesave Type: Optical Trap')
+        logger.info('Detected Forcesave Type: Optical Trap')
         # Very sophisticated logic for deciding which sensors to run
         # Detect peaks logic included w/n the afm/trap logic as a (pointless
         # and ineffective?) attempt at future proofing someone wanting to run
@@ -904,7 +899,7 @@ def main_fft_run(filter_on = True):
 
     ### AFM Run
     if forcesave_type['afm'] == True:
-        print('Detected Forcesave Type: AFM')
+        logger.info('Detected Forcesave Type: AFM')
         psd_df = afm_run(col=1)
 def peaks_from_psdfile(infile_path, tsd, space):
     """ Export a csv of peaks thresholded by rolling local maxima/variance 
@@ -926,53 +921,126 @@ def peaks_from_psdfile(infile_path, tsd, space):
     -----
     WILL NOT warn before overwriting a file of the same name
     """
-    print('tsd: %d, space: %d, psdfile: %s' %(tsd, space, infile_path))
+    logger.info('tsd: %d, space: %d, psdfile: %s' %(tsd, space, infile_path))
     # read in data
+    # TODO read the file header, if any, as well
     psd = pd.read_csv(infile_path, sep=',', comment='#')
     # find peaks
-    print('Looking for peaks...')
+    logger.info('Looking for peaks...')
     peaks = get_windowed_peaks(psd, tsd, space)
 
-    # generate a default savefile name
+    # generate a default savefile name for save_dialog
     outfile = append_filename(fn=infile_path, text='peaks')
     # ask user savefile name
-    outfile = save_dialog(outfile)
+    p['outfile'] = save_dialog(outfile)
     # output peaks
-    export_peaks_from_psdfile(peaks, outfile)
-    # add header to output
-    add_header(outfile)
+    export_peaks_from_psdfile(peaks, p['outfile'])
 
-## Main logic -- should this be a function? Is that structured programming
-## overkill?
-## Probs should, as it lets us include multiple "main logics" in the same
-## script and keep expanding outwards
-def main_fftpeaks_logic(force_windowed_peaks=True):
+    # add header to output
+    add_header(p['outfile'])
+
+
+### Pseudo Mains
+def main_fftpeaks_logic(p, force_windowed_peaks=True):
     """ Decide whether to run psd calculation (fft) or peak detection.
     """
     # "good enough for now"
-    if force_windowed_peaks:
-        args.psdfile = path_dialog('file')
+    # if force_windowed_peaks:
+        # args.psdfile = path_dialog('file')
+
     ## Windowed peak detection path
-    if args.psdfile or force_windowed_peaks:
+    if force_windowed_peaks:
         # So assigning new vars works, but changing the values of args, like in
         # the commented lines below, does not. I have no idea why
-        # Now time to make sure no function calls directly reference args.* :(
+        # Need to make sure no function calls directly reference args.* :(
         # ^ doesn't look like any do. We should be good enough for now
-        tsd = ask_tsd(args.thresh_sd)
-        space = ask_space(args.peak_space)
+        p['tsd'] = ask_tsd(args.thresh_sd)
+        p['space'] = ask_space(args.peak_space)
         # args.thresh_sd = ask_tsd(args.thresh_sd)
         # args.peak_space = ask_space(args.peak_space)
 
-        peaks_from_psdfile(infile_path = args.psdfile, tsd = tsd,
-                           space = space)
+        peaks_from_psdfile(infile_path = p['psdfile'], tsd = p['tsd'],
+                           space = p['space'])
     ## PSD calculation path
+    # Vestigial from when there were aspirations to have both psd and peak
+    # detection in the same script
     else:
         main_fft_run(filter_on = args.filter_on)
+def logger_setup(p):
+    """ Basic setup for crash logger
+    """
+    logfile = '/'.join((p['rootpath'], os.path.basename(__file__) ))
+    logfile = logfile + '.log'
+    datefmt = '%H:%M:%S'
+    logfmt = '%(asctime)s %(levelname)-8s %(message)s'
+    logging.basicConfig(filename=logfile, level=logging.DEBUG,
+                        filemode='w', # overwrite log file if exists
+                        format=logfmt, datefmt=datefmt)
+
+    ## Console Handler 
+    ## Have logger print to stdout as well as log file
+    ch = logging.StreamHandler(sys.stdout)
+    chfmt = logging.Formatter('%(asctime)s: %(message)s', datefmt)
+    ch.setFormatter(chfmt)
+    # logger.getlogger.info().addHandler(ch)
+    
+    ## !! new testing
+    ## boilerplate, "allows per module configuration" 
+    logger = logging.getLogger(__name__)
+    logger.addHandler(ch)
+
+    return logger
+def premain_setup():
+    """ Begin the param storing dict p
+    TODO logger
+    """
+    p = {}
+    p['psdfile'] = path_dialog('file') # user selects the input psdfile
+    p['rootpath'] = os.path.dirname(p['psdfile'])
+
+    logger = logger_setup(p) # need rootpath to set logfilename
+    logger.info("Version %s (%s) -- \"%s\"" \
+                 %(__version__, __day__, __codename__) )
+    now = datetime.datetime.now()
+    daterun = now.strftime('%Y-%m-%d')
+    logger.info('Today is %s' % daterun)
+
+    return p, logger
+
 #------------------------------------------------- }}}
+### Main Proper
+def main(p):
+    """ Main function to log in case of crash
+    """
+    main_fftpeaks_logic(p, force_windowed_peaks=True)
 
-### NOT FUNCTION DEFINITIONS
-# run the regular script
-main_fftpeaks_logic(force_windowed_peaks=True)
+## log in case main function crashes
+if __name__ == "__main__":
+    p, logger = premain_setup()
+    try:
+        main(p)
+        logger.info("YOU ARE ALL FREE NOW")
 
-### Get out while you can
-print("YOU ARE ALL FREE NOW")
+    except Exception as e:
+        logger.exception("Main crashed. Error: %s", e)
+
+
+### Misc Notes
+# TODO move this to some part of the README, or a note-for-future dev file
+""" note on future (python 3) division
+
+b/c this was in detect_peaks.py, and we should use non-ambiguous div ops
+
+'//' "floor division" operator (python 2 def for ints)
+'/' "true division" operator (python 2 def for floats)
+
+>>> from __future__ import division
+>>> 5 // 2 
+    2
+>>> 5 / 2
+    2.5
+>>> int(5 / 2)
+    2
+>>> float(5 // 2)
+    2.0
+"""
