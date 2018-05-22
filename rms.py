@@ -39,9 +39,6 @@ parser.add_argument('--nofilter', dest='filter_on', action='store_false',
 parser.add_argument('--filter', dest='filter_on', action='store_true',
                     help='Highpass filter on')
 parser.set_defaults(filter_on=False) 
-parser.add_argument('--signal', dest='export_signal', action='store_true', 
-                    help='Export signal to csv')
-parser.set_defaults(export_signal=False) 
 
 # Access an arg value by the syntax 'args.<argument_name>'
 args = parser.parse_args()

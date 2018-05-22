@@ -39,8 +39,6 @@ parser.add_argument('--nofilter', dest='filter_on', action='store_false',
 parser.add_argument('--filter', dest='filter_on', action='store_true',
                     help='Highpass filter on (default)')
 parser.set_defaults(filter_on=True) 
-parser.add_argument('--noblc', dest='baseline_correct', action='store_false',
-                    help='Do not apply baseline correction to signal before rms calculation')
 
 # Access an arg value by the syntax 'args.<argument_name>'
 args = parser.parse_args()
