@@ -9,8 +9,8 @@ from __future__ import division, print_function
 
 ### SCRIPT INFO
 __author__ = 'Nick Chahley, https://github.com/pantsthecat/laser-tweezers'
-__version__ = '1.2.1'
-__day__ = '2018-01-21'
+__version__ = '1.2.2'
+__day__ = '2018-05-28'
 __codename__ = 'Weeping Angel' 
 
 ### Imports and defs and arguments {{{
@@ -71,36 +71,97 @@ parser.add_argument('-mpd', '--peak_space', type=int, default=10,
 # Access an arg value by the syntax 'args.<argument_name>'
 args = parser.parse_args()
 
-
-## FFT/PSD General
-class CommentedFile:
-    """ Skips all lines that start with commentstring
+## Pseudo Mains 
+def premain_setup():
+    """ Define params dict p, and setup logger
     """
-    def __init__(self, f, commentstring="#"):
-        self.f = f
-        self.commentstring = commentstring
-    def next(self):
-        line = self.f.next()
-        while line.startswith(self.commentstring):
-            line = self.f.next()
-        return line
-    def __iter__(self):
-        return self
-# def dirsep():
-    # """ This function is no longer used, right?
-    # """
-    # if sys.platform.lower().startswith('win'):
-        # dirsep = '\\'
-    # else:
-        # dirsep = '/'
-    # return dirsep
-def get_cwd():
-    ### Check OS switch 
-    if sys.platform.lower().startswith('win'):
-        cdir = os.getcwd().split('\\')[-1] # Windows
+    # dict to store settings, params and pass 'em to others
+    # global p
+    p = {}
+    p['rootpath'] = path_dialog('folder') # user selects starting folder (QT)
+
+    logger = logger_setup(p) # need rootpath to set logfilename
+    logger.info("Version %s (%s) -- \"%s\"" \
+                 %(__version__, __day__, __codename__) )
+    now = datetime.datetime.now()
+    daterun = now.strftime('%Y-%m-%d')
+    logger.info('Today is %s' % daterun)
+
+    return p, logger
+def logger_setup(p):
+    """ Basic setup for crash logger
+    """
+    logfile = '/'.join((p['rootpath'], os.path.basename(__file__) ))
+    logfile = logfile + '.log'
+    datefmt = '%H:%M:%S'
+    logfmt = '%(asctime)s %(levelname)-8s %(message)s'
+    logging.basicConfig(filename=logfile, level=logging.DEBUG,
+                        filemode='w', # overwrite log file if exists
+                        format=logfmt, datefmt=datefmt)
+
+    ## Console Handler 
+    ## Have logger print to stdout as well as log file
+    ch = logging.StreamHandler(sys.stdout)
+    chfmt = logging.Formatter('%(asctime)s: %(message)s', datefmt)
+    ch.setFormatter(chfmt)
+    # logger.getLogger().addHandler(ch)
+    
+    ## !! new testing
+    ## boilerplate, "allows per module configuration" 
+    logger = logging.getLogger(__name__)
+    logger.addHandler(ch)
+
+    return logger
+def main_fft_run(p, filter_on=True):
+    """ Setup and run either optical or afm psd calculation.
+    
+    In a function so we can conveniently choose to not run it.
+    But the detect peaks logic/funs are in it as well so... fuck
+    """
+    # Report variable settings for fft/psd run
+    if filter_on == True:
+        logger.info("Butterworth order 3 highpass filter is ON")
+        logger.info("Low cutoff frequency is %d Hz" % args.cf_low)
     else:
-        cdir = os.getcwd().split('/')[-1] # *.nix
-    return cdir
+        logger.info("Butterworth highpass filter is OFF")
+
+    # Open first force-save*.txt file we can find and read/calculate scan 
+    # paramaters from the header of that file. *assumption that params are consistant
+    # across all scans*
+    p = walk_get_params_2(p['rootpath'], p)
+
+    # Assume the first force save file encountered is the same type (optical
+    # trap / afm) as all other files involved in this run.
+    p['forcesave_type'] = detect_forcesave_type(p['rootpath'])
+
+    ### Optical Trap Run(s)
+    if p['forcesave_type']['optical'] == True:
+        logger.info('Detected Forcesave Type: Optical Trap')
+        # Very sophisticated logic for deciding which sensors to run
+        # Detect peaks logic included w/n the afm/trap logic as a (pointless
+        # and ineffective?) attempt at future proofing someone wanting to run
+        # multiple trap channels (eg x AND z) in a single execution.
+        # Also so we can lamely pass sensor id to export_peaks
+        if args.run_x_fft == True:
+            p['sensor'] = 'x'
+            psd_df = single_channel_run(p['sensor'], 0)
+
+        if args.run_y_fft == True:
+            p['sensor'] = 'y'
+            psd_df = single_channel_run(p['sensor'], 1)
+
+        if args.run_z_fft == True:
+            p['sensor'] = 'z'
+            psd_df = single_channel_run(p['sensor'], 2)
+
+    ### AFM Run
+    elif p['forcesave_type']['afm'] == True:
+        logger.info('Detected Forcesave Type: AFM')
+        p['sensor'] = 'AFM'
+        psd_df = afm_run(sensor=p['sensor'], col=1)
+
+## Reorder signal processing functions to be in order called. Hopefully this
+## makes more sense when scrolling down for people not using code folding.
 def freq_calc(N, fs):    
     """ The line above was commented out
     """
@@ -114,6 +175,143 @@ def freq_calc(N, fs):
     # drop dc offset and neg freqs
     freq = freq[ind]
     return freq
+def detect_forcesave_type(path):  
+    """ Returns a dict of optical/afm and a bool indicating if the file read
+        is of that type. Walks through directory tree, terminates at first 
+        successful identification.
+    """
+
+    # Use this dict to store bools for afm vs optical trap ft id
+    # global fs_type
+    fs_type = {'optical' : False,
+               'afm' : False}
+    fs_type_matches = {'optical' : '# bead-id',
+                       'afm' : '# approachID'}
+
+    success = False
+    for subdir, dirs, files in os.walk(path):
+        if success == False:
+            os.chdir(subdir)
+            infile = glob('force-save*.txt')
+            if len(infile) > 0:
+                logger.info('Infering force-save type from dir: %s\n file: %s'\
+                      %(subdir,infile[0]))
+
+                search = open(infile[0], 'r')
+
+                for line in search.readlines():
+                    for key in fs_type_matches.keys():
+                        if line.split(':')[0] == fs_type_matches[key]:
+                            fs_type[key] = True
+                            success = True
+                            break
+                    if success == True:
+                        break
+    return fs_type
+def single_channel_run(sensor, col, channel=1):
+    """ Run over all subdirs, extracting/transforming signal from <channel>
+        Yes, this is inefficient. Fight me. I'm sorry.
+
+        sensor column codes: 0,1,2 = x,y,z
+        channel is always 1 right now, but maybe someone'll want 2 also in the
+        future 
+    """
+    # TODO p{} is a arg
+    # TODO sensor >> p['sensor'], could still keep this the same and just
+    # call with single_channel_run(p['sensor'], col)
+    logger.info('\nBeginning single run for channel %s' %sensor + str(channel))
+    ### Init data dictionaries
+    global psd_d
+    psd_d = {}
+    psd_d['Hz'] = p['freq']
+    global sig_d
+    sig_d = {}
+    sig_d['Time'] = p['t']
+        
+    ### Attempted os looping
+    for subdir, dirs, files in os.walk(p['rootpath']):
+        os.chdir(subdir)
+        scan_name = get_cwd()
+        logger.info(' '.join(("Entering", scan_name)))
+        scan_transformation(glob('force-save*.txt'), scan_name, col=col)
+
+    ### Make and export dataframes
+    rootpathname = '/'.join((p['rootpath'], p['rootpath'].split('/')[-1]))
+    df = dict_to_df(psd_d)
+    outfile = '_'.join((rootpathname, sensor, "psd.csv"))
+    logger.info('Exporting PSD csv for %s' %sensor)
+    df.to_csv(outfile, index=False)
+    header_psd_add(outfile, args, p)
+
+    sdf = dict_to_df(sig_d)
+    outfile = '_'.join((rootpathname, sensor, "sig.csv"))
+    logger.info('Exporting raw signal csv for %s' %sensor)
+    sdf.to_csv(outfile, index=False)
+
+    # return the psd df for processing by detect_peaks -- which we dont really
+    # do anymore, but GEFN?
+    return df
+def afm_run(sensor='AFM', col=1):
+    """ Run over all subdirs. This is a copy of single_channel_run() slightly
+        changed in the event of an AFM force-save detection
+        Col we're interested in is col 1 (vDisplacement)
+    """
+    logger.info('Beginning an AFM run')
+    ### Init data dictionaries
+    global psd_d
+    psd_d = {}
+    psd_d['Hz'] = p['freq']
+    global sig_d
+    sig_d = {}
+    sig_d['Time'] = p['t']
+        
+    ### Attempted os looping
+    for subdir, dirs, files in os.walk(p['rootpath']):
+        os.chdir(subdir)
+        scan_name = get_cwd()
+        logger.info(' '.join(("Entering", scan_name)))
+        scan_transformation(glob('force-save*.txt'), scan_name, col=col)
+
+    ### Make and export dataframes
+    # rootpathname = '/'.join((rootpath, rootpath.split('/')[-1]))
+    rootpathname = '/'.join((p['rootpath'], p['rootpath'].split('/')[-1]))
+    df = dict_to_df(psd_d)
+    outfile = '_'.join((rootpathname, sensor, "psd.csv"))
+    logger.info('Exporting PSD csv for %s' %sensor)
+    df.to_csv(outfile, index=False)
+    header_psd_add(outfile, args, p)
+
+    sdf = dict_to_df(sig_d)
+    outfile = '_'.join((rootpathname, sensor, "sig.csv"))
+    logger.info('Exporting raw signal csv for %s' %sensor)
+    sdf.to_csv(outfile, index=False)
+
+    # TODO rm this
+    # return the psd df for processing by detect_peaks
+    return df
+def scan_transformation(infile, scan_name, col=2):
+    """ Run the above functions and store psd for each scan in a dict (psd_d)
+        Also store extracted raw signal in a dict
+
+        channel/sensor codes: 0,1,2 = x,y,z
+    """
+    if len(infile) > 0: # if there is at least 1 force-save*.txt
+        colnames = []
+        infile.sort()
+        for i in range(len(infile)): # for each force-save*.txt
+            colnames.append(''.join((scan_name, '-', str(i+1))))
+            sig = read_forcesave(infile[i], col=col)
+            psd, sig_corrected = psd_powerplay(sig, p['dt'])
+            psd_d[colnames[i]] = psd 
+            sig_d[colnames[i]] = sig_corrected
+            logger.info(' '.join(("Finished:", colnames[i])))
+def get_cwd():
+    ### Check OS switch 
+    if sys.platform.lower().startswith('win'):
+        cdir = os.getcwd().split('\\')[-1] # Windows
+    else:
+        cdir = os.getcwd().split('/')[-1] # *.nix
+    return cdir
 def read_forcesave(f, col=2):
     """ Reads AFM force-save.txt << nope, back to old. Now use forcesave-type
     detection functions to call either afm_run() or single_channel_run()
@@ -165,6 +363,7 @@ def psd_powerplay(X, dt):  #X is a varaible name
     N = len(X)
     
     # Baseline corrected signal
+    # Do this before any filtering
     X = X - np.mean(X)
 
     # Highpass filter -- rm signals below cutoff freq
@@ -183,7 +382,7 @@ def psd_powerplay(X, dt):  #X is a varaible name
     fx = np.fft.rfft(X_psd)
     # Index + and - components of fz, start at 1 to lose DC offset 
     if N % 2 == 0:
-        ind = np.arange(1,N//2) # future division
+        ind = np.arange(1,N//2)   # future division
     else:
         ind = np.arange(1,N//2+1) # future division
 
@@ -192,22 +391,22 @@ def psd_powerplay(X, dt):  #X is a varaible name
 
     # X_output: the filtered (if args.filter_on), baseline corrected time-series
     return psd, X_output
-def scan_transformation(infile, scan_name, col=2):
-    """ Run the above functions and store psd for each scan in a dict (psd_d)
-        Also store extracted raw signal in a dict
-
-        channel/sensor codes: 0,1,2 = x,y,z
+def butter_highpass_filter(data, highcut, fs, order=3):
+    """ Return Butterworth HP filtered time series
+    highcut, fs in Hz
+    from scipy cookbook
     """
-    if len(infile) > 0: # if there is at least 1 force-save*.txt
-        colnames = []
-        infile.sort()
-        for i in range(len(infile)): # for each force-save*.txt
-            colnames.append(''.join((scan_name, '-', str(i+1))))
-            sig = read_forcesave(infile[i], col=col)
-            psd, sig_corrected = psd_powerplay(sig, p['dt'])
-            psd_d[colnames[i]] = psd 
-            sig_d[colnames[i]] = sig_corrected
-            logger.info(' '.join(("Finished:", colnames[i])))
+    b, a = butter_highpass(highcut, fs, order=order)
+    y = scipy.signal.lfilter(b, a, data)
+    return y
+def butter_highpass(highcut, fs, order=3):
+    """ Design a digital highpass Butterworth filter, return filter coefficents
+    highcut, fs in Hz
+    """
+    nyq = 0.5 * fs
+    norm_highcut = highcut / nyq
+    b, a = scipy.signal.butter(order, norm_highcut, btype='high')
+    return b, a
 def dict_to_df(d):
     """ Make df from dict with Hz as 1st col and alpha-num order after
         This fun is mostly about formatting colnames
@@ -225,6 +424,84 @@ def dict_to_df(d):
         cols.insert(0, cols.pop(cols.index('Hz')))
         df = df.reindex(columns=cols)
     return df
+
+## Input/Output and Reading/Infering Parameters
+def path_dialog(whatyouwant):
+    """ Prompt user to select a dir (def) or file, return its path
+
+    In
+    ---
+    whatyouwant : str opts=['folder', 'file']
+
+    Out
+    ---
+    path : str, Absolute path to file
+
+    """
+    import Tkinter
+    root = Tkinter.Tk()
+    root.withdraw()
+
+    opt = {}
+    opt['parent'] = root
+    opt['initialdir'] = './'
+
+    if whatyouwant == 'folder':
+        from tkFileDialog import askdirectory
+        ask_fun = askdirectory
+        # dirpath will be to dir that user IS IN when they click confirm
+        opt['title'] = 'Please select your experiment directory (be IN this folder)'
+
+    if whatyouwant == 'file':
+        from tkFileDialog import askopenfilename
+        ask_fun = askopenfilename
+        opt['title'] = 'Select psd file to detect peaks from'
+        opt['filetypes'] = (('CSV files', '*.csv'), ('All files', '*.*'))
+
+    path = ask_fun(**opt)
+    return path
+def walk_get_params_2(path, p):
+    """ Read scan params from first force-save encountered and break, assumes 
+    all files have the same parameters
+    This is a quick fix, and probably bad form but should do alright in a pinch
+
+    "2": uses dict p to store vars
+    """
+    success = False
+    for subdir, dirs, files in os.walk(path):
+        if success == False:
+            os.chdir(subdir)
+            infile = glob('force-save*.txt')
+            if len(infile) > 0:
+                logger.info('Reading Scan Parameters from dir: %s' %subdir)
+                p = header_get_params_psd(infile[0], p)
+                success == True
+                break
+    # used by psd_powerplay(N, dt)
+    # dt = float(1/params['fs']) # was this doing anything?
+    p['freq'] = freq_calc(len(p['t']), p['fs'])
+    return p
+class CommentedFile:
+    """ Skips all lines that start with commentstring
+    """
+    def __init__(self, f, commentstring="#"):
+        self.f = f
+        self.commentstring = commentstring
+    def next(self):
+        line = self.f.next()
+        while line.startswith(self.commentstring):
+            line = self.f.next()
+        return line
+    def __iter__(self):
+        return self
+# def dirsep():
+    # """ This function is no longer used, right?
+    # """
+    # if sys.platform.lower().startswith('win'):
+        # dirsep = '\\'
+    # else:
+        # dirsep = '/'
+    # return dirsep
 def get_match_val(f, match):
     search = open(f, "r")
 
@@ -263,131 +540,109 @@ def get_params(f):
     date = date.split('-')[0] 
 
     return t, fs, date
-def butter_highpass(highcut, fs, order=3):
-    """ Design a digital highpass Butterworth filter, return filter coefficents
-    highcut, fs in Hz
+
+## Output Header
+def header_get_params_psd(f, p):
+    """ Where params is a dict containing info/settings 
+    
+    Issues:
+    - date could be different across forcesave files
     """
-    nyq = 0.5 * fs
-    norm_highcut = highcut / nyq
-    b, a = scipy.signal.butter(order, norm_highcut, btype='high')
-    return b, a
-def butter_highpass_filter(data, highcut, fs, order=3):
-    """ Return Butterworth HP filtered time series
-    highcut, fs in Hz
-    from scipy cookbook
+    
+    logger.info("Read params from file %s" %f)
+
+    # TODO exception handling for TypeError
+    T = float(get_match_val(f, "settings.segment.1.duration:")) # (s)
+    N = int(get_match_val(f, "settings.segment.1.num-points:"))
+    fs = N/T
+    dt = 1/fs
+    # please don't let this appear on r/shittyprogramming
+    p['T'] = T
+    p['N'] = N
+    p['fs'] = fs
+    p['dt'] = dt
+    p['t'] = np.arange(dt, T+dt, dt) # generate time-points for signal (s)
+
+    # NOTE test
+    id_list = ['bead-id:', 'approachID:']
+    date = get_match_val(f, id_list)
+    # date is at front of id string ~ "yyyy.mm.dd-hh.mm.ss-*"
+    p['date'] = date.split('-')[0] 
+
+    return p
+def header_psd_setup(args, p):
+    """ Prepare dict, list, w/e to be written to output file
+
+    Format of lines is meant to be in the same vein as force-save.txt files,
+    with ': ' as the id:value delimiter, section headers (if any) in Title Case
+    and separated by a blank line, and a firstline file descriptor is in
+    uppercase. 
+        # FILE DESCRIPTION
+        # Section A Header:
+        # var-group-if-applicable.var-name: value(s)
+        # 
+        # Section B Header:
     """
-    b, a = butter_highpass(highcut, fs, order=order)
-    y = scipy.signal.lfilter(b, a, data)
-    return y
-def path_dialog(whatyouwant):
-    """ Prompt user to select a dir (def) or file, return its path
+    # TODO consolidate psd/peaks variants (simple ifcase should do)
 
-    In
-    ---
-    whatyouwant : str opts=['folder', 'file']
+    # OrderedDict remembers the order keys are added to it
+    info = collections.OrderedDict()
+    info['file-description'] = 'PSD OUTPUT'
 
-    Out
-    ---
-    path : str, Absolute path to file
+    ## get a time for script execution
+    now = datetime.datetime.now()
+    daterun = now.strftime('%Y-%m-%d %H:%M:%S')
+    info['daterun'] = 'date: %s' % daterun
 
+    ## assemble script information
+    whoami = os.path.basename(sys.argv[0]) 
+    info['script'] = 'script.info: %s %s (%s) \"%s\"' \
+                     %(whoami, __version__, __day__, __codename__)
+
+    ## psd calculation parameters
+    # convert fst from dict to list, list should be len 1
+    forcesave_type = [k for k in p['forcesave_type'].keys() \
+                      if p['forcesave_type'][k]]
+    info['forcesave-type'] = 'forcesave-type: %s' % ', '.join(forcesave_type)
+    info['fs'] = 'sampling-rate-hz: %d' % p['fs']
+
+    info['filter-on'] = 'filter: %s' % args.filter_on
+    if args.filter_on:
+        info['cf-low'] = 'filter.cf-low-hz: %d' % args.cf_low
+    if args.run_z_fft:
+        info['sensor'] = 'sensor: %s' % p['sensor'] 
+
+    # at bottom since probs least interested in
+    info['experiment-dir'] = 'experiment-dir.name: %s' \
+                             % p['rootpath'].split('/')[-1]
+    info['experiment-path'] = 'experiment-dir.path: %s' % p['rootpath']
+
+
+    return info
+def header_psd_add(outfile, args, p):
+    info = header_psd_setup(args, p)
+    header_write(info, outfile)
+def header_write(info, outfile, commentchar='# '):
+    """ Prepend commentchar-header to outfile containing useful info.
+    info : dict
+        each entry is a line of the header to be printed
+    outfile : str
+    commentchar : str
     """
-    import Tkinter
-    root = Tkinter.Tk()
-    root.withdraw()
+    with open(outfile, 'r') as f:
+        tmpfile = ''.join((outfile, '.tmp'))
+        with open(tmpfile, 'w') as f2:
+            # write the header
+            for k in info.keys():
+                f2.write(commentchar + info[k] + '\n')
 
-    opt = {}
-    opt['parent'] = root
-    opt['initialdir'] = './'
-
-    if whatyouwant == 'folder':
-        from tkFileDialog import askdirectory
-        ask_fun = askdirectory
-        # dirpath will be to dir that user IS IN when they click confirm
-        opt['title'] = 'Please select your experiment directory (be IN this folder)'
-
-    if whatyouwant == 'file':
-        from tkFileDialog import askopenfilename
-        ask_fun = askopenfilename
-        opt['title'] = 'Select psd file to detect peaks from'
-        opt['filetypes'] = (('CSV files', '*.csv'), ('All files', '*.*'))
-
-    path = ask_fun(**opt)
-    return path
-
-
-## Generalised run functions, script SHOULD be able to accept optical or
-# afm force-save files (unverified)
-def detect_forcesave_type(path):  
-    """ Returns a dict of optical/afm and a bool indicating if the file read
-        is of that type. Walks through directory tree, terminates at first 
-        successful identification.
-    """
-
-    # Use this dict to store bools for afm vs optical trap ft id
-    # global fs_type
-    fs_type = {'optical' : False,
-               'afm' : False}
-    fs_type_matches = {'optical' : '# bead-id',
-                       'afm' : '# approachID'}
-
-    success = False
-    for subdir, dirs, files in os.walk(path):
-        if success == False:
-            os.chdir(subdir)
-            infile = glob('force-save*.txt')
-            if len(infile) > 0:
-                logger.info('Infering force-save type from dir: %s\n file: %s'\
-                      %(subdir,infile[0]))
-
-                search = open(infile[0], 'r')
-
-                for line in search.readlines():
-                    for key in fs_type_matches.keys():
-                        if line.split(':')[0] == fs_type_matches[key]:
-                            fs_type[key] = True
-                            success = True
-                            break
-                    if success == True:
-                        break
-    return fs_type
-def afm_run(sensor='AFM', col=1):
-    """ Run over all subdirs. This is a copy of single_channel_run() slightly
-        changed in the event of an AFM force-save detection
-        Col we're interested in is col 1 (vDisplacement)
-    """
-    logger.info('Beginning an AFM run')
-    ### Init data dictionaries
-    global psd_d
-    psd_d = {}
-    psd_d['Hz'] = p['freq']
-    global sig_d
-    sig_d = {}
-    sig_d['Time'] = p['t']
-        
-    ### Attempted os looping
-    for subdir, dirs, files in os.walk(p['rootpath']):
-        os.chdir(subdir)
-        scan_name = get_cwd()
-        logger.info(' '.join(("Entering", scan_name)))
-        scan_transformation(glob('force-save*.txt'), scan_name, col=col)
-
-    ### Make and export dataframes
-    # rootpathname = '/'.join((rootpath, rootpath.split('/')[-1]))
-    rootpathname = '/'.join((p['rootpath'], p['rootpath'].split('/')[-1]))
-    df = dict_to_df(psd_d)
-    outfile = '_'.join((rootpathname, sensor, "psd.csv"))
-    logger.info('Exporting PSD csv for %s' %sensor)
-    df.to_csv(outfile, index=False)
-    header_psd_add(outfile, args, p)
-
-    sdf = dict_to_df(sig_d)
-    outfile = '_'.join((rootpathname, sensor, "sig.csv"))
-    logger.info('Exporting raw signal csv for %s' %sensor)
-    sdf.to_csv(outfile, index=False)
-
-    # TODO rm this
-    # return the psd df for processing by detect_peaks
-    return df
+            # write the data
+            f2.write(f.read())
+    # hotfix for WindowsError 183: won't rename if file already exists
+    if os.name == 'nt':
+        os.remove(outfile)
+    os.rename(tmpfile, outfile)
+    # apparently this leaves no .tmp to cleanup?
 
 ## Detect Peaks suite
 def strip_ext(filename, ret_ext=False):
@@ -617,12 +872,10 @@ def export_peaks_from_psdfile(peaks_df, infile_path):
     logger.info('Exporting PSD peaks csv')
     logger.info('Exporting to: %s' %outfile)
     peaks_df.to_csv(outfile, index=False)
-
-
-## The one where Ross tries to clean up and compartmentalize different uses 
-## for the script but introduces a bunch of global variables instead
 def peaks_from_psdfile(infile_path, space=args.peak_space):
     """ Here we try to make a dynamic windowed threshold for peak height """
+    ## The one where Ross tries to clean up and compartmentalize different uses 
+    ## for the script but introduces a bunch of global variables instead
     psd_df = pd.read_csv(infile_path, sep=',')
     # get a df of peaks regardless of any height thresholds
     peaks_df = get_peaks(psd_df, thresh_sd=None, space=space)
@@ -631,269 +884,10 @@ def peaks_from_psdfile(infile_path, space=args.peak_space):
     k = space // 2
 
     export_peaks_from_psdfile(peaks_df, infile_path)
-def single_channel_run(sensor, col, channel=1):
-    """ Run over all subdirs, extracting/transforming signal from <channel>
-        Yes, this is inefficient. Fight me. I'm sorry.
-
-        sensor column codes: 0,1,2 = x,y,z
-        channel is always 1 right now, but maybe someone'll want 2 also in the
-        future 
-    """
-    # TODO p{} is a arg
-    # TODO sensor >> p['sensor'], could still keep this the same and just
-    # call with single_channel_run(p['sensor'], col)
-    logger.info('\nBeginning single run for channel %s' %sensor + str(channel))
-    ### Init data dictionaries
-    global psd_d
-    psd_d = {}
-    psd_d['Hz'] = p['freq']
-    global sig_d
-    sig_d = {}
-    sig_d['Time'] = p['t']
-        
-    ### Attempted os looping
-    for subdir, dirs, files in os.walk(p['rootpath']):
-        os.chdir(subdir)
-        scan_name = get_cwd()
-        logger.info(' '.join(("Entering", scan_name)))
-        scan_transformation(glob('force-save*.txt'), scan_name, col=col)
-
-    ### Make and export dataframes
-    rootpathname = '/'.join((p['rootpath'], p['rootpath'].split('/')[-1]))
-    df = dict_to_df(psd_d)
-    outfile = '_'.join((rootpathname, sensor, "psd.csv"))
-    logger.info('Exporting PSD csv for %s' %sensor)
-    df.to_csv(outfile, index=False)
-    header_psd_add(outfile, args, p)
-
-    sdf = dict_to_df(sig_d)
-    outfile = '_'.join((rootpathname, sensor, "sig.csv"))
-    logger.info('Exporting raw signal csv for %s' %sensor)
-    sdf.to_csv(outfile, index=False)
-
-    # return the psd df for processing by detect_peaks -- which we dont really
-    # do anymore, but GEFN?
-    return df
-
-
-## Output Header
-def header_write(info, outfile, commentchar='# '):
-    """ Prepend commentchar-header to outfile containing useful info.
-    info : dict
-        each entry is a line of the header to be printed
-    outfile : str
-    commentchar : str
-    """
-    with open(outfile, 'r') as f:
-        tmpfile = ''.join((outfile, '.tmp'))
-        with open(tmpfile, 'w') as f2:
-            # write the header
-            for k in info.keys():
-                f2.write(commentchar + info[k] + '\n')
-
-            # write the data
-            f2.write(f.read())
-    # hotfix for WindowsError 183: won't rename if file already exists
-    if os.name == 'nt':
-        os.remove(outfile)
-    os.rename(tmpfile, outfile)
-    # apparently this leaves no .tmp to cleanup?
-def header_get_params_psd(f, p):
-    """ Where params is a dict containing info/settings 
-    
-    Issues:
-    - date could be different across forcesave files
-    """
-    
-    logger.info("Read params from file %s" %f)
-
-    # TODO exception handling for TypeError
-    T = float(get_match_val(f, "settings.segment.1.duration:")) # (s)
-    N = int(get_match_val(f, "settings.segment.1.num-points:"))
-    fs = N/T
-    dt = 1/fs
-    # please don't let this appear on r/shittyprogramming
-    p['T'] = T
-    p['N'] = N
-    p['fs'] = fs
-    p['dt'] = dt
-    p['t'] = np.arange(dt, T+dt, dt) # generate time-points for signal (s)
-
-    # NOTE test
-    id_list = ['bead-id:', 'approachID:']
-    date = get_match_val(f, id_list)
-    # date is at front of id string ~ "yyyy.mm.dd-hh.mm.ss-*"
-    p['date'] = date.split('-')[0] 
-
-    return p
-def header_psd_setup(args, p):
-    """ Prepare dict, list, w/e to be written to output file
-
-    Format of lines is meant to be in the same vein as force-save.txt files,
-    with ': ' as the id:value delimiter, section headers (if any) in Title Case
-    and separated by a blank line, and a firstline file descriptor is in
-    uppercase. 
-        # FILE DESCRIPTION
-        # Section A Header:
-        # var-group-if-applicable.var-name: value(s)
-        # 
-        # Section B Header:
-    """
-    # TODO consolidate psd/peaks variants (simple ifcase should do)
-
-    # OrderedDict remembers the order keys are added to it
-    info = collections.OrderedDict()
-    info['file-description'] = 'PSD OUTPUT'
-
-    ## get a time for script execution
-    now = datetime.datetime.now()
-    daterun = now.strftime('%Y-%m-%d %H:%M:%S')
-    info['daterun'] = 'date: %s' % daterun
-
-    ## assemble script information
-    whoami = os.path.basename(sys.argv[0]) 
-    info['script'] = 'script.info: %s %s (%s) \"%s\"' \
-                     %(whoami, __version__, __day__, __codename__)
-
-    ## psd calculation parameters
-    # convert fst from dict to list, list should be len 1
-    forcesave_type = [k for k in p['forcesave_type'].keys() \
-                      if p['forcesave_type'][k]]
-    info['forcesave-type'] = 'forcesave-type: %s' % ', '.join(forcesave_type)
-    info['fs'] = 'sampling-rate-hz: %d' % p['fs']
-
-    info['filter-on'] = 'filter: %s' % args.filter_on
-    if args.filter_on:
-        info['cf-low'] = 'filter.cf-low-hz: %d' % args.cf_low
-    if args.run_z_fft:
-        info['sensor'] = 'sensor: %s' % p['sensor'] 
-
-    # at bottom since probs least interested in
-    info['experiment-dir'] = 'experiment-dir.name: %s' \
-                             % p['rootpath'].split('/')[-1]
-    info['experiment-path'] = 'experiment-dir.path: %s' % p['rootpath']
-
-
-    return info
-def header_psd_add(outfile, args, p):
-    info = header_psd_setup(args, p)
-    header_write(info, outfile)
-def walk_get_params_2(path, p):
-    """ Read scan params from first force-save encountered and break, assumes 
-    all files have the same parameters
-    This is a quick fix, and probably bad form but should do alright in a pinch
-
-    "2": uses dict p to store vars
-    """
-    success = False
-    for subdir, dirs, files in os.walk(path):
-        if success == False:
-            os.chdir(subdir)
-            infile = glob('force-save*.txt')
-            if len(infile) > 0:
-                logger.info('Reading Scan Parameters from dir: %s' %subdir)
-                p = header_get_params_psd(infile[0], p)
-                success == True
-                break
-    # used by psd_powerplay(N, dt)
-    # dt = float(1/params['fs']) # was this doing anything?
-    p['freq'] = freq_calc(len(p['t']), p['fs'])
-    return p
-
-
-### Pseudo Mains 
-def main_fft_run(p, filter_on=True):
-    """ Setup and run either optical or afm psd calculation.
-    
-    In a function so we can conveniently choose to not run it.
-    But the detect peaks logic/funs are in it as well so... fuck
-    """
-    # Report variable settings for fft/psd run
-    if filter_on == True:
-        logger.info("Butterworth order 3 highpass filter is ON")
-        logger.info("Low cutoff frequency is %d Hz" % args.cf_low)
-    else:
-        logger.info("Butterworth highpass filter is OFF")
-
-    # Open first force-save*.txt file we can find and read/calculate scan 
-    # paramaters from the header of that file. *assumption that params are consistant
-    # across all scans*
-    p = walk_get_params_2(p['rootpath'], p)
-
-    # Assume the first force save file encountered is the same type (optical
-    # trap / afm) as all other files involved in this run.
-    p['forcesave_type'] = detect_forcesave_type(p['rootpath'])
-
-    ### Optical Trap Run(s)
-    if p['forcesave_type']['optical'] == True:
-        logger.info('Detected Forcesave Type: Optical Trap')
-        # Very sophisticated logic for deciding which sensors to run
-        # Detect peaks logic included w/n the afm/trap logic as a (pointless
-        # and ineffective?) attempt at future proofing someone wanting to run
-        # multiple trap channels (eg x AND z) in a single execution.
-        # Also so we can lamely pass sensor id to export_peaks
-        if args.run_x_fft == True:
-            p['sensor'] = 'x'
-            psd_df = single_channel_run(p['sensor'], 0)
-
-        if args.run_y_fft == True:
-            p['sensor'] = 'y'
-            psd_df = single_channel_run(p['sensor'], 1)
-
-        if args.run_z_fft == True:
-            p['sensor'] = 'z'
-            psd_df = single_channel_run(p['sensor'], 2)
-
-    ### AFM Run
-    elif p['forcesave_type']['afm'] == True:
-        logger.info('Detected Forcesave Type: AFM')
-        p['sensor'] = 'AFM'
-        psd_df = afm_run(sensor=p['sensor'], col=1)
-def premain_setup():
-    """ Define params dict p, and setup logger
-    """
-    # dict to store settings, params and pass 'em to others
-    # global p
-    p = {}
-    p['rootpath'] = path_dialog('folder') # user selects starting folder (QT)
-
-    logger = logger_setup(p) # need rootpath to set logfilename
-    logger.info("Version %s (%s) -- \"%s\"" \
-                 %(__version__, __day__, __codename__) )
-    now = datetime.datetime.now()
-    daterun = now.strftime('%Y-%m-%d')
-    logger.info('Today is %s' % daterun)
-
-    return p, logger
-def logger_setup(p):
-    """ Basic setup for crash logger
-    """
-    logfile = '/'.join((p['rootpath'], os.path.basename(__file__) ))
-    logfile = logfile + '.log'
-    datefmt = '%H:%M:%S'
-    logfmt = '%(asctime)s %(levelname)-8s %(message)s'
-    logging.basicConfig(filename=logfile, level=logging.DEBUG,
-                        filemode='w', # overwrite log file if exists
-                        format=logfmt, datefmt=datefmt)
-
-    ## Console Handler 
-    ## Have logger print to stdout as well as log file
-    ch = logging.StreamHandler(sys.stdout)
-    chfmt = logging.Formatter('%(asctime)s: %(message)s', datefmt)
-    ch.setFormatter(chfmt)
-    # logger.getLogger().addHandler(ch)
-    
-    ## !! new testing
-    ## boilerplate, "allows per module configuration" 
-    logger = logging.getLogger(__name__)
-    logger.addHandler(ch)
-
-    return logger
 
 #------------------------------------------------- }}}
 
-
-### Main Proper
+## Main Proper
 def main(p):
     """ Main function to log in case of crash
     """
@@ -910,7 +904,7 @@ if __name__ == "__main__":
         logger.exception("Main crashed. Error: %s", e)
 
 
-### Misc Notes
+## Misc Notes
 # TODO move this to some part of the README, or a note-for-future dev file
 """ note on future (python 3) division
 
